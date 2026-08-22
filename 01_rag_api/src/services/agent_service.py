@@ -10,22 +10,49 @@ from src.repositories.history_repository import HistoryRepository
 from src.repositories.models.history import History
 from src.utils.environment import (
     HISTORY_LIMIT,
-    RETRIEVAL_LIMIT
+    RETRIEVAL_LIMIT,
+    QUERY_EXPANSION_COUNT
 )
 from src.utils.logger import get_logger
 from src.integrations.db_vectorial_integration import DbVectorialIntegration
 from src.integrations.embedding_integration import EmbeddingIntegration
 from src.integrations.llm_integration import LLMIntegration
+from src.dto.busqueda_dto import ElementoBusqueda
+from src.integrations.query_expansion_integration import QueryExpansionIntegration
 
 logger = get_logger(__name__)
 
 class AgentService:
-    def __init__(self, embedding: EmbeddingIntegration, dbVectorial: DbVectorialIntegration, llm:LLMIntegration, db: Session,) -> None:
+    def __init__(
+        self,
+        db: Session,
+        embedding: EmbeddingIntegration,
+        dbVectorial: DbVectorialIntegration,
+        llm_integration: LLMIntegration,
+        query_expansion: QueryExpansionIntegration,
+    ) -> None:
+            
         self._repo = HistoryRepository(db)
         self._embedding = embedding
         self._dbVectorial = dbVectorial
-        self._llm = llm
+        self._llm = llm_integration
+        self._query_expansion = query_expansion
+        
+    def _retrieve_with_query_expansion(self, question: str) -> tuple[list[ElementoBusqueda], int]:
+        variants = self._query_expansion.expand(question, QUERY_EXPANSION_COUNT)
+        queries = [question] + variants
 
+        best_by_id: dict[str, ElementoBusqueda] = {}
+        for query in queries:
+            vector = self._embedding.generate_embedding(query)
+            for ctx in self._dbVectorial.search(vector, limit=RETRIEVAL_LIMIT):
+                existing = best_by_id.get(ctx.id)
+                if existing is None or ctx.score > existing.score:
+                    best_by_id[ctx.id] = ctx
+
+        merged = sorted(best_by_id.values(), key=lambda ctx: ctx.score, reverse=True)
+        return merged[:RETRIEVAL_LIMIT], len(variants)
+    
     async def chat(self, question: str, user: str, session_id: Optional[str]) -> dict:
         is_new_session = not session_id
         if is_new_session:
@@ -50,12 +77,11 @@ class AgentService:
 
         t0 = time.perf_counter()
         # Implementar RAG
-        # Paso 1: Generar embedding de la pregunta
-        vector = self._embedding.generate_embedding(question)
-        # Paso 2: Buscar en la base de datos vectorial los documentos más relevantes
-        contexts = self._dbVectorial.search(vector, limit=RETRIEVAL_LIMIT)
+        # Paso 1 y 2: Expandir la pregunta en variantes y buscar documentos similares
+        # para cada una, fusionando y deduplicando los resultados (query expansion).
+        contexts, variants_count = self._retrieve_with_query_expansion(question)
         formatted_contexts = "\n".join([f"- {ctx.content}" for ctx in contexts])
-
+        
         # Paso 3: Inferir respuesta
         result = self._llm.generate_response(question, formatted_contexts, history_messages)
         retrieved_contexts = formatted_contexts
@@ -85,7 +111,8 @@ class AgentService:
                 "t_history_ms": round(t_history * 1000, 2),
                 "t_agent_ms": round(t_agent * 1000, 2),
                 "t_save_ms": round(t_save * 1000, 2),
-                "retrieved_contexts_count": len(retrieved_contexts or []),
+                "query_variants_count": variants_count,
+                "retrieved_contexts_count": len(contexts),
             },
         )
 

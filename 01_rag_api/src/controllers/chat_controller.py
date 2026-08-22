@@ -6,6 +6,7 @@ from src.services.history_service import HistoryService
 from src.integrations.impl.openai_embedding_integration import OpenAIEmbeddingIntegration
 from src.integrations.impl.qdrant_integration import QdrantIntegration
 from src.integrations.impl.openai_llm_integration import OpenAILlmIntegration
+from src.integrations.impl.openai_query_expansion_integration import OpenAIQueryExpansionIntegration
 
 async def handle_chat(
     question: str,
@@ -16,8 +17,15 @@ async def handle_chat(
     embedding = OpenAIEmbeddingIntegration()
     dbVectorial = QdrantIntegration()
     llm = OpenAILlmIntegration()
-    
-    service = AgentService(embedding=embedding, dbVectorial=dbVectorial, llm=llm, db=db)
+    query_expansion = OpenAIQueryExpansionIntegration()
+
+    service = AgentService(
+        embedding=embedding,
+        dbVectorial=dbVectorial,
+        llm_integration=llm,
+        query_expansion=query_expansion,
+        db=db,
+    )
     return await service.chat(question=question, user=user, session_id=session_id)
 
 def get_history(session_id: str, db: Session) -> List[History]:

@@ -9,6 +9,7 @@ ASSISTANT_NAME: str = config("ASSISTANT_NAME", default="Asistente")
 DATABASE_URL: str = config("DATABASE_URL")
 HISTORY_LIMIT: int = config("HISTORY_LIMIT", default=10, cast=int)
 RETRIEVAL_LIMIT: int = config("RETRIEVAL_LIMIT", default=5, cast=int)
+QUERY_EXPANSION_COUNT: int = config("QUERY_EXPANSION_COUNT", default=3, cast=int)
 
 QDRANT_URL: str | None = config("QDRANT_URL", default=None)
 QDRANT_API_KEY: str | None = config("QDRANT_API_KEY", default=None)
