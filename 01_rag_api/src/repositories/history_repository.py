@@ -23,7 +23,7 @@ class HistoryRepository:
         return (
             self.db.query(History)
             .filter(History.session_id == session_id)
-            .order_by(History.created_at.asc())
+            .order_by(History.created_at.desc())
             .limit(limit)
             .all()
         )
@@ -32,7 +32,7 @@ class HistoryRepository:
         return (
             self.db.query(History)
             .filter(History.session_id == session_id)
-            .order_by(History.created_at.asc())
+            .order_by(History.created_at.desc())
             .all()
         )
 

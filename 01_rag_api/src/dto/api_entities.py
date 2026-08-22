@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -21,7 +21,7 @@ class HistoryItem(BaseModel):
     trace_id: UUID
     session_id: UUID
     user: Optional[str] = None
-    retrieved_contexts: Optional[List[Dict[str, Any]]] = None
+    retrieved_contexts: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -30,3 +30,8 @@ class HistoryItem(BaseModel):
 class UserSessionsResponse(BaseModel):
     user: str
     sessions: List[str]
+
+class LLMResponse(BaseModel):
+    answer: str
+    input_tokens: int
+    output_tokens: int

@@ -3,6 +3,9 @@ from sqlalchemy.orm import Session
 from src.repositories.models.history import History
 from src.services.agent_service import AgentService
 from src.services.history_service import HistoryService
+from src.integrations.impl.openai_embedding_integration import OpenAIEmbeddingIntegration
+from src.integrations.impl.qdrant_integration import QdrantIntegration
+from src.integrations.impl.openai_llm_integration import OpenAILlmIntegration
 
 async def handle_chat(
     question: str,
@@ -10,7 +13,11 @@ async def handle_chat(
     session_id: Optional[str],
     db: Session,
 ) -> dict:
-    service = AgentService(db)
+    embedding = OpenAIEmbeddingIntegration()
+    dbVectorial = QdrantIntegration()
+    llm = OpenAILlmIntegration()
+    
+    service = AgentService(embedding=embedding, dbVectorial=dbVectorial, llm=llm, db=db)
     return await service.chat(question=question, user=user, session_id=session_id)
 
 def get_history(session_id: str, db: Session) -> List[History]:
