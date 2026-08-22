@@ -7,6 +7,7 @@ from src.integrations.impl.openai_embedding_integration import OpenAIEmbeddingIn
 from src.integrations.impl.qdrant_integration import QdrantIntegration
 from src.integrations.impl.openai_llm_integration import OpenAILlmIntegration
 from src.integrations.impl.openai_query_expansion_integration import OpenAIQueryExpansionIntegration
+from src.integrations.impl.openai_reranker_integration import OpenAIRerankerIntegration
 
 async def handle_chat(
     question: str,
@@ -18,12 +19,14 @@ async def handle_chat(
     dbVectorial = QdrantIntegration()
     llm = OpenAILlmIntegration()
     query_expansion = OpenAIQueryExpansionIntegration()
-
+    reranker = OpenAIRerankerIntegration()
+    
     service = AgentService(
         embedding=embedding,
         dbVectorial=dbVectorial,
         llm_integration=llm,
         query_expansion=query_expansion,
+        reranker=reranker,
         db=db,
     )
     return await service.chat(question=question, user=user, session_id=session_id)

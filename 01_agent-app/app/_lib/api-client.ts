@@ -32,8 +32,8 @@ export interface HistoryItem {
   trace_id: string
   session_id: string
   user: string | null
+  retrieved_contexts: string | null
   created_at: string
-  is_ok: boolean | null
 }
 
 export function getHistory(sessionId: string, token: string): Promise<HistoryItem[]> {

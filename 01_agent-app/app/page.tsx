@@ -64,8 +64,8 @@ export default function HomePage() {
       trace_id: '__pending__',
       session_id: sessionRef ?? '',
       user: user.email,
+      retrieved_contexts: null,
       created_at: new Date().toISOString(),
-      is_ok: null,
     }
     setHistory((prev) => [...prev, placeholder])
 
@@ -81,8 +81,8 @@ export default function HomePage() {
         trace_id: response.trace_id,
         session_id: response.session_id,
         user: user.email,
-        created_at: new Date().toISOString(),
-        is_ok: null,
+        retrieved_contexts: null,
+        created_at: new Date().toISOString()
       }
 
       setHistory((prev) => [...prev.slice(0, -1), newItem])

@@ -20,13 +20,15 @@ class HistoryRepository:
         return self.db.query(History).filter(History.trace_id == trace_id).first()
 
     def get_by_session_id(self, session_id: str, limit: int = 10) -> List[History]:
-        return (
+        records = (
             self.db.query(History)
             .filter(History.session_id == session_id)
             .order_by(History.created_at.desc())
             .limit(limit)
             .all()
         )
+        
+        return list(reversed(records))
 
     def get_all_by_session_id(self, session_id: str) -> List[History]:
         return (
