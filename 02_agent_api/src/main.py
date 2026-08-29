@@ -11,17 +11,27 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: conectar al MCP de Neon y reinicializar el agente con todas las tools."""
-    from src.services.tools import load_neon_tools, get_all_tools
+    """Startup: conectar a los MCP servers configurados y reinicializar el agente con todas las tools."""
+    from src.services.tools import load_neon_tools, load_demo_mcp_tools, get_all_tools
     from src.services.agent_service import init_agent
 
     mcp_tools = []
+
     try:
-        mcp_tools, _ = await load_neon_tools()
-        if mcp_tools:
-            logger.info("Neon MCP conectado — %d tool(s) disponibles", len(mcp_tools))
+        neon_tools, _ = await load_neon_tools()
+        mcp_tools.extend(neon_tools)
+        if neon_tools:
+            logger.info("Neon MCP conectado — %d tool(s) disponibles", len(neon_tools))
     except Exception as exc:
-        logger.warning("Error conectando a Neon MCP: %s. Continuando sin tools MCP.", exc)
+        logger.warning("Error conectando a Neon MCP: %s. Continuando sin esas tools.", exc)
+
+    try:
+        demo_tools, _ = await load_demo_mcp_tools()
+        mcp_tools.extend(demo_tools)
+        if demo_tools:
+            logger.info("Demo MCP server conectado — %d tool(s) disponibles", len(demo_tools))
+    except Exception as exc:
+        logger.warning("Error conectando al demo MCP server: %s. Continuando sin esas tools.", exc)
 
     all_tools = get_all_tools(mcp_tools or None)
     init_agent(all_tools)

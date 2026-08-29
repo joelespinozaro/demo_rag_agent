@@ -72,7 +72,7 @@ def init_agent(tools: list) -> None:
         model=_llm,
         tools=tools,
         system_prompt=SYSTEM_PROMPT,
-        middleware=_INPUT_GUARDRAILS,
+        # middleware=_INPUT_GUARDRAILS,
     )
     logger.info("Agente reinicializado con %d tool(s): %s", len(tools), [t.name for t in tools])
 

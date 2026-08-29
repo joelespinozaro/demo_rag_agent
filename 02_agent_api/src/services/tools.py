@@ -1,3 +1,4 @@
+import sys
 from typing import Any, Dict, List, Tuple
 
 from langchain_core.tools import tool
@@ -6,6 +7,7 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
 
 from src.utils.environment import (
+    DEMO_MCP_SERVER_PATH,
     NEON_API_KEY,
     OPENAI_API_KEY,
     QDRANT_API_KEY,
@@ -98,10 +100,34 @@ async def load_neon_tools() -> Tuple[list, object | None]:
     return tools, client
 
 
+async def load_demo_mcp_tools() -> Tuple[list, object | None]:
+    """Conecta al demo MCP server (03_mcp_server) por stdio y retorna (tools, client).
+    Retorna ([], None) si DEMO_MCP_SERVER_PATH no está configurado.
+
+    Se ejecuta con sys.executable (el mismo intérprete/venv que corre esta API), ya
+    que 03_mcp_server no requiere dependencias adicionales a las ya instaladas aquí.
+    """
+    if not DEMO_MCP_SERVER_PATH:
+        logger.info("DEMO_MCP_SERVER_PATH no configurado — omitiendo integración con demo MCP server")
+        return [], None
+
+    client = MultiServerMCPClient(
+        {
+            "demo_mcp_server": {
+                "transport": "stdio",
+                "command": sys.executable,
+                "args": [DEMO_MCP_SERVER_PATH],
+            }
+        }
+    )
+    tools = await client.get_tools()
+    return tools, client
+
+
 def get_all_tools(mcp_tools: list | None = None) -> list:
     """Retorna las tools locales combinadas con las tools MCP opcionales."""
     all_tools = list(LOCAL_TOOLS)
     if mcp_tools:
         all_tools.extend(mcp_tools)
-        logger.info("Cargadas %d tool(s) de Neon MCP: %s", len(mcp_tools), [t.name for t in mcp_tools])
+        logger.info("Cargadas %d tool(s) MCP: %s", len(mcp_tools), [t.name for t in mcp_tools])
     return all_tools
