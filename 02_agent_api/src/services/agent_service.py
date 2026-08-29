@@ -8,17 +8,39 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langchain_openai import ChatOpenAI
 from sqlalchemy.orm import Session
 
-from src.services.tools import get_weather, retrieve_documents
+from src.services.guardrails import build_input_guardrails
+from src.services.guardrails.common import hash_message
+from src.services.tools import LOCAL_TOOLS
 from src.repositories.history_repository import HistoryRepository
 from src.repositories.models.history import History
 from src.utils.environment import (
     HISTORY_LIMIT,
+    NEON_PROJECT_ID,
     OPENAI_API_KEY,
     OPENAI_MODEL,
 )
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Pipeline InputGuardrail (HU SEC-001): se construye una sola vez y se reutiliza
+# en ambas inicializaciones del agente (inicial y tras cargar tools MCP).
+_INPUT_GUARDRAILS = build_input_guardrails()
+
+_neon_context = (
+    f"Tienes acceso a una base de datos Neon Postgres. "
+    f"El project_id que debes usar SIEMPRE en las herramientas MCP es: {NEON_PROJECT_ID}. "
+    f"Nunca le preguntes al usuario el project_id, ya lo tienes. "
+    f"La base de datos tiene las siguientes tablas: "
+    f"- ventas (id, fecha_venta, id_cliente, total_venta, estado (esto puede ser completada o pendiente), id_vendedor)"
+    f"- detalle_ventas (id, id_venta, id_producto, cantidad, precio_unitario, subtotal)"
+    f"- clientes (id, dni, nombres, sexo, fecha_nacimiento)"
+    f"- vendedores (id, dni, nombres, fecha_ingreso, fecha_nacimiento)"
+    f"- productos (id, descripcion, precio, stock)"
+    f"Cuando el usuario pregunte sobre ventas, clientes, vendedores o productos, usa run_sql con ese project_id para consultar. "
+    f"Para preguntas sobre programas, cursos, temarios, precios, duración, requisitos, certificaciones o cualquier "
+    f"información institucional, usa retrieve_documents en lugar de run_sql. "
+) if NEON_PROJECT_ID else ""
 
 SYSTEM_PROMPT = (
     "Eres un asistente útil y amigable. Responde siempre en español. "
@@ -28,23 +50,46 @@ SYSTEM_PROMPT = (
     "información institucional, DEBES usar la herramienta retrieve_documents "
     "para consultar la base de conocimiento antes de responder; no respondas "
     "esos temas de memoria. Si la herramienta no encuentra información "
-    "relevante, dilo explícitamente en tu respuesta."
+    "relevante, dilo explícitamente en tu respuesta. "
+    + _neon_context
 )
 
 RETRIEVER_TOOL_NAME = "retrieve_documents"
 
+_llm = ChatOpenAI(model=OPENAI_MODEL, api_key=OPENAI_API_KEY)
+_agent = create_agent(
+    model=_llm,
+    tools=LOCAL_TOOLS,
+    system_prompt=SYSTEM_PROMPT,
+    middleware=_INPUT_GUARDRAILS,
+)
+
+
+def init_agent(tools: list) -> None:
+    """Reinicializa el agente global con el conjunto de tools provisto (locales + MCP)."""
+    global _agent
+    _agent = create_agent(
+        model=_llm,
+        tools=tools,
+        system_prompt=SYSTEM_PROMPT,
+        middleware=_INPUT_GUARDRAILS,
+    )
+    logger.info("Agente reinicializado con %d tool(s): %s", len(tools), [t.name for t in tools])
+
+
 class AgentService:
     def __init__(self, db: Session) -> None:
         self._repo = HistoryRepository(db)
-        self._llm = ChatOpenAI(model=OPENAI_MODEL, api_key=OPENAI_API_KEY)
-        self._agent = create_agent(
-            model=self._llm,
-            tools=[get_weather, retrieve_documents],
-            system_prompt=SYSTEM_PROMPT,
-        )
 
     async def chat(self, question: str, user: str, session_id: Optional[str]) -> dict:
-        logger.info(f"Pregunta entrante de {user}: {question}")
+        # No se loguea la pregunta en texto plano: el InputGuardrail (capas 1-8)
+        # corre dentro de _agent.ainvoke y puede bloquear mensajes con secretos
+        # o PII antes de procesarlos; solo se hashea aquí (criterio de privacidad
+        # de HU_InputGuardrail.md).
+        logger.info(
+            "Pregunta entrante",
+            extra={"user": user, "question_hash": hash_message(question)},
+        )
 
         is_new_session = not session_id
         if is_new_session:
@@ -68,7 +113,7 @@ class AgentService:
             history_messages.append(AIMessage(content=record.answer))
 
         t0 = time.perf_counter()
-        agent_response = await self._agent.ainvoke(
+        agent_response = await _agent.ainvoke(
             {"messages": [*history_messages, HumanMessage(content=question)]}
         )
         result = self._parse_agent_response(agent_response)

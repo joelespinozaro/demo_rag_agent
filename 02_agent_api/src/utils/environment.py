@@ -11,7 +11,21 @@ QDRANT_API_KEY: str | None = config("QDRANT_API_KEY", default=None)
 QDRANT_COLLECTION_NAME: str = config("QDRANT_COLLECTION_NAME", default="documents")
 
 NEON_API_KEY: str | None = config("NEON_API_KEY", default=None)
+NEON_PROJECT_ID: str | None = config("NEON_PROJECT_ID", default=None)
 
 LANGSMITH_API_KEY: str | None = config("LANGSMITH_API_KEY", default=None)
 LANGSMITH_PROJECT: str = config("LANGSMITH_PROJECT", default="agente-mcp")
 LANGSMITH_ENDPOINT: str = config("LANGSMITH_ENDPOINT", default="https://api.smith.langchain.com")
+
+# InputGuardrail (HU SEC-001) — Capas 7 y 8, servidas vía Groq API
+GROQ_API_KEY: str = config("GROQ_API_KEY")
+GROQ_PROMPT_GUARD_MODEL: str = config(
+    "GROQ_PROMPT_GUARD_MODEL", default="meta-llama/Llama-Prompt-Guard-2-86M"
+)
+GROQ_LLAMA_GUARD_MODEL: str = config(
+    "GROQ_LLAMA_GUARD_MODEL", default="meta-llama/Llama-Guard-4-12B"
+)
+GROQ_TIMEOUT_SECONDS: float = config("GROQ_TIMEOUT_SECONDS", default=3, cast=float)
+
+# InputGuardrail — Capa 4 (anti-ReDoS)
+CUSTOM_REGEX_TIMEOUT_SECONDS: float = config("CUSTOM_REGEX_TIMEOUT_SECONDS", default=1, cast=float)

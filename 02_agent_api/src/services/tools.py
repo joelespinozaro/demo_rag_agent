@@ -1,10 +1,12 @@
 from typing import Any, Dict, List, Tuple
 
 from langchain_core.tools import tool
+from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
 
 from src.utils.environment import (
+    NEON_API_KEY,
     OPENAI_API_KEY,
     QDRANT_API_KEY,
     QDRANT_COLLECTION_NAME,
@@ -70,3 +72,36 @@ def retrieve_documents(query: str, k: int = 4) -> Tuple[str, List[Dict[str, Any]
 
     content = "\n\n---\n\n".join(content_parts)
     return content, contexts
+
+
+LOCAL_TOOLS = [get_weather, retrieve_documents]
+
+
+async def load_neon_tools() -> Tuple[list, object | None]:
+    """Conecta al MCP de Neon y retorna (tools, client). Retorna ([], None) si NEON_API_KEY no está configurado."""
+    if not NEON_API_KEY:
+        logger.info("NEON_API_KEY no configurado — omitiendo integración Neon MCP")
+        return [], None
+
+    client = MultiServerMCPClient(
+        {
+            "neon": {
+                "transport": "streamable_http",
+                "url": "https://mcp.neon.tech/mcp",
+                "headers": {
+                    "Authorization": f"Bearer {NEON_API_KEY}"
+                },
+            }
+        }
+    )
+    tools = await client.get_tools()
+    return tools, client
+
+
+def get_all_tools(mcp_tools: list | None = None) -> list:
+    """Retorna las tools locales combinadas con las tools MCP opcionales."""
+    all_tools = list(LOCAL_TOOLS)
+    if mcp_tools:
+        all_tools.extend(mcp_tools)
+        logger.info("Cargadas %d tool(s) de Neon MCP: %s", len(mcp_tools), [t.name for t in mcp_tools])
+    return all_tools
