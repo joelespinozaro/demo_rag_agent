@@ -83,6 +83,8 @@ export default function HomePage() {
         user: user.email,
         created_at: new Date().toISOString(),
         is_ok: null,
+        sources: response.sources,
+        files: response.files,
       }
 
       setHistory((prev) => [...prev.slice(0, -1), newItem])
