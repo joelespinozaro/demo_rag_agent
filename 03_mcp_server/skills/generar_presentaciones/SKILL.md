@@ -28,15 +28,36 @@ una respuesta normal.
 - Cada slide: un título corto y claro, más 3 a 5 viñetas concisas (frases
   cortas, no párrafos).
 - No repitas el título general como título de la primera slide de contenido:
-  la portada se genera sola con ese título.
+  la portada se genera sola con ese título (con diseño oscuro + acento).
+
+### Layouts disponibles (elegí el que mejor calce, no uses siempre el mismo)
+
+Cada slide tiene un campo `layout`, uno de:
+
+- **`contenido`** (default): título + lista de viñetas. Úsalo para la mayoría
+  de las slides.
+- **`separador`**: solo un título grande centrado sobre fondo oscuro, sin
+  viñetas. Úsalo para dividir la presentación en secciones cuando el tema
+  tiene 2 o más bloques temáticos claros (ej. antes de pasar de "Programas"
+  a "Precios y becas").
+- **`comparacion`**: dos columnas lado a lado, cada una con su propio
+  `left_title`/`left_bullets` y `right_title`/`right_bullets`. Úsalo cuando
+  el contenido sea naturalmente comparativo (dos programas, antes/después,
+  pros/contras) — no fuerces una comparación si el tema no la tiene.
+
+No uses `separador` para todas las slides ni abuses de `comparacion`: la
+mayoría de una presentación normal es `contenido`.
 
 ## Cómo generarla
 
 Una vez decidido el título general y la lista de slides (cada una con su
-`title` y sus `bullets`), llama a la tool `generate_pptx(title, slides)`. La
-tool arma el archivo .pptx real y lo entrega directamente en la interfaz del
-chat como adjunto descargable — vos no generás el archivo, solo decidís el
-contenido y llamás a la tool con esa estructura.
+`layout`, `title` y — según el layout — `bullets` o
+`left_title`/`left_bullets`/`right_title`/`right_bullets`), llama a la tool
+`generate_pptx(title, slides)`. La tool arma el archivo .pptx real (con un
+diseño ya prolijo: portada oscura, acento de color, footer con numeración) y
+lo entrega directamente en la interfaz del chat como adjunto descargable —
+vos no generás el archivo ni elegís colores/fuentes, solo decidís el
+contenido y el layout de cada slide.
 
 ## Qué NO hacer
 

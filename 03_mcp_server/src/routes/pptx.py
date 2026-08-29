@@ -21,7 +21,13 @@ def register_pptx_tools(mcp: FastMCP) -> None:
     async def generate_pptx(
         title: str = Field(description="Título de la presentación"),
         slides: list[SlideInput] = Field(
-            description="Lista de slides; cada una con 'title' (string) y 'bullets' (lista de viñetas en string)"
+            description=(
+                "Lista de slides. Cada una: 'layout' ('contenido' | 'separador' | "
+                "'comparacion', default 'contenido'), 'title'. Para 'contenido': "
+                "'bullets' (lista de strings). Para 'comparacion': 'left_title', "
+                "'left_bullets', 'right_title', 'right_bullets'. 'separador' solo usa "
+                "'title'. Ver skill 'generar_presentaciones' para cuándo usar cada uno."
+            )
         ),
     ) -> CallToolResult:
         return await pptx_controller.handle_generate_pptx(title, slides)
