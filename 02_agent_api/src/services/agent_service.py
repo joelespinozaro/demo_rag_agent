@@ -203,13 +203,13 @@ def init_agent(
     y, si hay skills descubiertas en el demo MCP server, agrega SkillMiddleware
     (inyecta sus descripciones en el prompt + la tool load_skill)."""
     global _agent
-    middleware = [SkillMiddleware(skill_client, skills)] if skill_client and skills else []
+    skill_middleware = [SkillMiddleware(skill_client, skills)] if skill_client and skills else []
+    middleware = skill_middleware + _INPUT_GUARDRAILS
     _agent = create_agent(
         model=_llm,
         tools=tools,
         system_prompt=SYSTEM_PROMPT,
         middleware=middleware,
-        # middleware=_INPUT_GUARDRAILS,
     )
     logger.info(
         "Agente reinicializado con %d tool(s) (%d skill(s)): %s",
