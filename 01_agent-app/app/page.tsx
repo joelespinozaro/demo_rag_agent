@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from './_lib/auth-context'
-import { getSessions, getHistory, sendMessage, type HistoryItem } from './_lib/api-client'
+import { getSessions, getHistory, sendMessage, getErrorTypes, postFeedback, type HistoryItem, type ErrorType } from './_lib/api-client'
 import ChatArea from './_components/ChatArea'
 
 export default function HomePage() {
@@ -26,6 +26,9 @@ export default function HomePage() {
   const [sendError, setSendError] = useState<string | null>(null)
   const [sessionRef, setSessionRef] = useState<string | null>(null)
 
+  const [errorTypes, setErrorTypes] = useState<ErrorType[]>([])
+  const [ratedItems, setRatedItems] = useState<Map<string, boolean>>(new Map())
+
   useEffect(() => {
     if (loading || !user || !token) return
 
@@ -33,6 +36,10 @@ export default function HomePage() {
       .then((data) => setSessions(data.sessions))
       .catch(() => setSessions([]))
       .finally(() => setLoadingSessions(false))
+
+    getErrorTypes(token)
+      .then(setErrorTypes)
+      .catch(() => {})
   }, [loading, user, token])
 
   useEffect(() => {
@@ -45,7 +52,14 @@ export default function HomePage() {
     setHistory([])
 
     getHistory(activeSession, token)
-      .then((data) => setHistory(data))
+      .then((data) => {
+        setHistory(data)
+        const initialRatings = new Map<string, boolean>()
+        for (const item of data) {
+          if (item.is_ok !== null) initialRatings.set(item.trace_id, item.is_ok)
+        }
+        setRatedItems(initialRatings)
+      })
       .catch(() => setHistory([]))
       .finally(() => setLoadingHistory(false))
   }, [activeSession, token])
@@ -115,6 +129,16 @@ export default function HomePage() {
     setSendError(null)
   }
 
+  async function handleFeedback(
+    traceId: string,
+    isOk: boolean,
+    errorTypeId?: number,
+    observations?: string,
+  ): Promise<void> {
+    await postFeedback({ trace_id: traceId, is_ok: isOk, error_type_id: errorTypeId, observations }, token!)
+    setRatedItems((prev) => new Map(prev).set(traceId, isOk))
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
@@ -180,6 +204,9 @@ export default function HomePage() {
           history={history}
           loading={loadingHistory}
           activeSession={activeSession}
+          errorTypes={errorTypes}
+          ratedItems={ratedItems}
+          onFeedback={handleFeedback}
         />
 
         <div className="border-t border-zinc-200 bg-white px-4 py-3">

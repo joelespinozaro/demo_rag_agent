@@ -117,3 +117,40 @@ export function sendMessage(request: ChatRequest, token: string): Promise<ChatRe
   })
 }
 
+export interface ErrorType {
+  id: number
+  description: string
+}
+
+export function getErrorTypes(token: string): Promise<ErrorType[]> {
+  return apiFetch<ErrorType[]>('/api/errors', token)
+}
+
+export interface FeedbackRequest {
+  trace_id: string
+  is_ok: boolean
+  error_type_id?: number
+  observations?: string
+}
+
+export interface FeedbackResponse {
+  trace_id: string
+  session_id: string
+  question: string
+  answer: string
+  user: string | null
+  created_at: string
+  is_ok: boolean | null
+  error_type_id: number | null
+  observations: string | null
+  sources?: ToolSource[] | null
+  files?: GeneratedFile[] | null
+}
+
+export function postFeedback(request: FeedbackRequest, token: string): Promise<FeedbackResponse> {
+  return apiFetch<FeedbackResponse>('/api/feedback', token, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  })
+}
+
