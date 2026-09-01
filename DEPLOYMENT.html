@@ -586,7 +586,8 @@ gcloud run deploy "$MCP_SERVER_SERVICE" \
   --project="$PROJECT_ID" --image="$MCP_SERVER_IMAGE" \
   --region="$REGION" --platform=managed \
   --no-allow-unauthenticated --service-account="$SERVICE_SA" \
-  --port=8080 --set-env-vars="$MCP_ENV_VARS"</pre></div>
+  --port=8080 --cpu=2 --memory=4Gi \
+  --set-env-vars="$MCP_ENV_VARS"</pre></div>
       <p>Despliega con <code>--no-allow-unauthenticated</code> — nadie fuera de <code>02_agent_api</code> (con la SA + <code>run.invoker</code> del siguiente paso) puede invocarlo.</p>
 
       <h3>2.3 Obtener URL y autorizar al Agent API</h3>
@@ -617,6 +618,14 @@ DEMO_MCP_SERVER_URL=${MCP_SERVER_URL}/mcp</pre></div>
       <p>También completa OpenAI, PostgreSQL y Groq. La credencial JSON queda vacía: Cloud Run utiliza la SA adjunta. <b>Sin barra final</b> en <code>/mcp</code> — con barra da un redirect 307 que descarta <code>Authorization</code> (ver Fase 2.3).</p>
 
       <h3>3.2 Build y deploy privado</h3>
+      <p>Las 5 credenciales sensibles (OpenAI, base de datos, Neon, Groq, LangSmith) no viajan como texto plano en la configuración de Cloud Run — el bucle de abajo las sube una sola vez a <b>Secret Manager</b> y el deploy solo referencia un puntero (<code>agent-openai-api-key:latest</code>), nunca el valor.</p>
+      <div class="grid-4" style="margin-top:6px">
+        <div class="card tool"><div class="card-head"><svg><use href="#i-shield"/></svg><b>El valor no queda expuesto</b></div><p><code>gcloud run services describe</code> muestra el nombre del secreto y su versión, nunca el contenido — a diferencia de una env var normal, legible por cualquiera con acceso de lectura al servicio.</p></div>
+        <div class="card tool"><div class="card-head"><svg><use href="#i-scale"/></svg><b>Acceso mínimo, uno por uno</b></div><p>El bucle otorga <code>secretAccessor</code> secreto por secreto a la Service Account — no un rol amplio sobre todo Secret Manager del proyecto.</p></div>
+        <div class="card tool"><div class="card-head"><svg><use href="#i-doc"/></svg><b>Versionado, no sobrescritura</b></div><p>Cada <code>versions add</code> crea una versión inmutable. <code>:latest</code> apunta a la más reciente, pero podés fijar un número y hacer rollback si una key se rota mal.</p></div>
+        <div class="card tool"><div class="card-head"><svg><use href="#i-server"/></svg><b>Queda auditado</b></div><p>Cada acceso a un secreto se registra en Cloud Audit Logs — una env var normal no deja ese rastro de quién la leyó ni cuándo.</p></div>
+      </div>
+      <details><summary>¿Por qué no simplemente poner las keys en <code>--set-env-vars</code>?</summary><p>Funcionaría, pero el valor quedaría en texto plano dentro de la revisión de Cloud Run — visible para cualquiera con permiso de lectura sobre el servicio (<code>run.services.get</code>), sin necesitar acceso a Secret Manager. Con secretos, ese mismo lector solo ve el <i>nombre</i> del secreto; para leer el valor necesita además <code>secretAccessor</code> sobre ese secreto puntual.</p></details>
       <div class="clarify"><span class="lbl">Recursos verificados</span><p>El contenedor carga spaCy, guardrails, LangChain y MCP durante el arranque. Con <code>1Gi</code> el arranque es inestable — usa <code>--cpu=4 --memory=4Gi</code>, que es lo que quedó probado y estable. Si no llega a escuchar <code>PORT=8080</code> revisa los logs primero (<code>gcloud run services logs read</code>, ver Validación) — no ocultes un cold start fallido aumentando solamente el timeout del Gateway.</p></div>
       <div class="codebox"><span class="codelabel">bash</span><button class="copy">Copiar</button><pre>export IMAGE_TAG="$(date +'%Y%m%d-%H%M%S')"
 export AGENT_API_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/02-agent-api:${IMAGE_TAG}"
@@ -684,6 +693,25 @@ echo "Agent API: $CLOUD_RUN_URL"</pre></div>
     <section class="mod" id="fase4">
       <div class="mod-head"><span class="mod-num">04</span><h2 class="mod-title">Crear API Gateway</h2></div>
       <p class="mod-kicker">El Gateway valida al usuario (JWT de Identity Platform) y recién después llama al Agent API con identidad de servicio — es la única puerta de entrada autenticada al backend.</p>
+
+      <p>Google API Gateway es un proxy administrado: recibe la request pública, valida el JWT contra Identity Platform y, solo si es válida, la reenvía a <code>02_agent_api</code> con una identidad de servicio distinta. Nada de esto vive en el código de FastAPI — es configuración declarada en <code>openapi_gateway.yml</code>, no lógica que tengas que mantener vos.</p>
+
+      <ol class="steps">
+        <li><b>El navegador</b> manda <code>Authorization: Bearer &lt;ID token de Identity Platform&gt;</code>, obtenido al loguearse contra la cuenta de prueba de la Fase 1.2.</li>
+        <li><b>El Gateway</b> valida firma, expiración y <code>audience</code> del token contra el <code>securitySchemes.identity_platform</code> del OpenAPI — si falla, corta acá mismo con <code>401</code> y el Agent API ni se entera de que existió la request.</li>
+        <li>Si el token es válido, el Gateway <b>cambia de identidad</b>: pide un ID token de Google para la Service Account (<code>--backend-auth-service-account</code> de la Fase 4.2) y lo adjunta en lugar del token del usuario.</li>
+        <li><b>Agent API</b> recibe la request ya autenticada como llamada de servicio a servicio, verificada por IAM de Cloud Run (<code>--no-allow-unauthenticated</code>) — nunca ve ni confía en el token original del usuario final.</li>
+      </ol>
+
+      <div class="grid-4" style="margin-top:6px">
+        <div class="card human"><div class="card-head"><svg><use href="#i-shield"/></svg><b>Reduce lo que queda expuesto</b></div><p><code>02_agent_api</code> se despliega privado (<code>--no-allow-unauthenticated</code>): nadie puede llamarlo directo aunque adivine la URL. La única puerta pública del backend es el Gateway.</p></div>
+        <div class="card human"><div class="card-head"><svg><use href="#i-scale"/></svg><b>Traduce la identidad</b></div><p>El usuario llega con <b>su</b> token; el Gateway lo cambia por un token de Google de la Service Account al reenviar. Agent API nunca maneja credenciales de usuarios finales.</p></div>
+        <div class="card human"><div class="card-head"><svg><use href="#i-doc"/></svg><b>El contrato vive en un YAML</b></div><p>Rutas, <code>deadline</code> y quién firma la auth están en <code>openapi_gateway.yml</code> — versionable (<code>GATEWAY_CONFIG_ID</code>) sin tocar ni redeployar el código de FastAPI.</p></div>
+        <div class="card human"><div class="card-head"><svg><use href="#i-power"/></svg><b>Corta temprano lo inválido</b></div><p>Un JWT ausente o vencido se rechaza en el Gateway antes de despertar un cold start de Cloud Run — el backend privado no gasta cómputo en tráfico no autenticado.</p></div>
+      </div>
+
+      <details><summary>¿Qué pasa si el JWT es inválido o venció?</summary><p>El Gateway responde <code>401 Unauthorized</code> directamente — la request nunca llega a Cloud Run. El frontend debe volver a loguear al usuario para obtener un token nuevo; no es un bug de <code>02_agent_api</code> aunque el error aparezca en la consola del navegador al llamar a la URL del Gateway.</p></details>
+
       <div class="clarify"><span class="lbl">Timeout real</span><p>El OpenAPI usa <code>deadline: 120.0</code>. La primera llamada inicializa agente, MCP y guardrails; el límite predeterminado puede producir un <code>504 upstream request timeout</code>.</p></div>
 
       <h3>4.1 Renderizar el OpenAPI</h3>
@@ -753,7 +781,9 @@ gcloud run deploy "$AGENT_APP_SERVICE" \
   --region "$REGION" \
   --platform managed \
   --allow-unauthenticated \
-  --port 3000</pre></div>
+  --port 3000 \
+  --cpu 2 \
+  --memory 2Gi</pre></div>
       <div class="clarify"><span class="lbl">Ojo</span><p>Las sustituciones van separadas por comas y sin espacios alrededor del <code>=</code> — si algún valor llegara a contener una coma (no debería, para una API key o un host), rómpelo en un <code>cloudbuild.yaml</code> con variables de entorno en vez de <code>--substitutions</code>.</p></div>
       <div class="codebox"><span class="codelabel">bash · verificar</span><button class="copy">Copiar</button><pre>gcloud run services describe "$AGENT_APP_SERVICE" \
   --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)'</pre></div>

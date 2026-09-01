@@ -299,6 +299,8 @@ gcloud run deploy "$MCP_SERVER_SERVICE" \
   --no-allow-unauthenticated \
   --service-account="$SERVICE_SA" \
   --port=8080 \
+  --cpu=2 \
+  --memory=4Gi \
   --set-env-vars="$MCP_ENV_VARS"
 ```
 
@@ -348,6 +350,15 @@ Por ejemplo, si el comando anterior mostró `https://mcp-server-service-abc-uc.a
 `GOOGLE_APPLICATION_CREDENTIALS` debe quedar **vacío** — en Cloud Run la SA de la Fase 1.4 reemplaza esa credencial local, tanto para Model Armor como para obtener el ID token hacia `03_mcp_server`.
 
 ### 3.2. Build + deploy
+
+Las 5 credenciales sensibles (OpenAI, base de datos, Neon, Groq, LangSmith) no viajan como texto plano en la configuración de Cloud Run — el bucle de abajo las sube una sola vez a **Secret Manager** y el deploy solo referencia un puntero (`agent-openai-api-key:latest`), nunca el valor. Por qué usar secretos en vez de variables de entorno directas:
+
+- **El valor no queda expuesto.** `gcloud run services describe` muestra el nombre del secreto y su versión, nunca el contenido — a diferencia de una env var normal, legible por cualquiera con acceso de lectura al servicio.
+- **Acceso mínimo, uno por uno.** El bucle otorga `secretAccessor` secreto por secreto a la Service Account, no un rol amplio sobre todo Secret Manager del proyecto.
+- **Versionado, no sobrescritura.** Cada `versions add` crea una versión inmutable. `:latest` apunta a la más reciente, pero podés fijar un número y hacer rollback si una key se rota mal.
+- **Queda auditado.** Cada acceso a un secreto se registra en Cloud Audit Logs — una env var normal no deja ese rastro de quién la leyó ni cuándo.
+
+> **¿Por qué no simplemente `--set-env-vars`?** Funcionaría, pero el valor quedaría en texto plano dentro de la revisión de Cloud Run, visible para cualquiera con permiso de lectura sobre el servicio (`run.services.get`), sin necesitar acceso a Secret Manager. Con secretos, ese mismo lector solo ve el *nombre* del secreto; para leer el valor necesita además `secretAccessor` sobre ese secreto puntual.
 
 > **Validación real del laboratorio:** este contenedor carga spaCy, guardrails, LangChain y clientes MCP durante el arranque — con `--memory=1Gi` el arranque es inestable (varias revisiones fallaron por esto durante la validación de esta guía). Usa `--cpu=4 --memory=4Gi`, que es lo que quedó probado y estable de punta a punta. Si Cloud Run informa que no escuchó `PORT=8080`, no aumentes el timeout del Gateway a ciegas: revisa primero los logs de la revisión (`gcloud run services logs read`, ver Verificación) — o, si tienes Docker instalado localmente, prueba la misma imagen con `docker run` (opcional, no lo necesitas para el resto de la guía). Las integraciones opcionales Neon MCP y LangSmith pueden omitirse del runtime sin quitar `DATABASE_URL` ni el MCP privado principal, pero si las incluyes revisa que **las 5** queden en `--set-secrets` — omitir una silenciosamente la deja sin conectar, sin ningún error visible.
 
@@ -416,6 +427,24 @@ gcloud run services add-iam-policy-binding "$AGENT_API_SERVICE" \
 ---
 
 ## Fase 4 — Crear el API Gateway
+
+Google API Gateway es un proxy administrado: recibe la request pública, valida el JWT contra Identity Platform y, solo si es válida, la reenvía a `02_agent_api` con una identidad de servicio distinta. Nada de esto vive en el código de FastAPI — es configuración declarada en `openapi_gateway.yml`, no lógica que tengas que mantener vos.
+
+Qué pasa en cada request:
+
+1. **El navegador** manda `Authorization: Bearer <ID token de Identity Platform>`, obtenido al loguearse con la cuenta de prueba de la Fase 1.2.
+2. **El Gateway** valida firma, expiración y `audience` del token contra el `securitySchemes.identity_platform` del OpenAPI — si falla, corta acá mismo con `401` y `02_agent_api` ni se entera de que existió la request.
+3. Si el token es válido, el Gateway **cambia de identidad**: pide un ID token de Google para la Service Account (`--backend-auth-service-account`, ver 4.3) y lo adjunta en lugar del token del usuario.
+4. **`02_agent_api`** recibe la request ya autenticada como llamada de servicio a servicio, verificada por IAM de Cloud Run (`--no-allow-unauthenticated`) — nunca ve ni confía en el token original del usuario final.
+
+Por qué vale la pena este salto extra en vez de exponer `02_agent_api` directo:
+
+- **Reduce lo que queda expuesto.** `02_agent_api` se despliega privado; nadie puede llamarlo directo aunque adivine la URL. La única puerta pública del backend es el Gateway.
+- **Traduce la identidad.** El usuario llega con su propio token; el Gateway lo cambia por un token de servicio al reenviar, así el backend nunca maneja credenciales de usuarios finales.
+- **El contrato vive en un YAML.** Rutas, `deadline` y quién firma la auth están en `openapi_gateway.yml` — versionable (`GATEWAY_CONFIG_ID`) sin tocar ni redeployar el código de FastAPI.
+- **Corta temprano lo inválido.** Un JWT ausente o vencido se rechaza en el Gateway antes de despertar un cold start de Cloud Run — el backend privado no gasta cómputo en tráfico no autenticado.
+
+> **¿Qué pasa si el JWT es inválido o venció?** El Gateway responde `401 Unauthorized` directamente — la request nunca llega a Cloud Run. Hay que volver a loguear al usuario para obtener un token nuevo; no es un bug de `02_agent_api` aunque el error aparezca al llamar a la URL del Gateway.
 
 ### 4.1. Obtener la URL del Cloud Run recién desplegado
 
@@ -503,7 +532,9 @@ gcloud run deploy "$AGENT_APP_SERVICE" \
   --region "$REGION" \
   --platform managed \
   --allow-unauthenticated \
-  --port 3000
+  --port 3000 \
+  --cpu 2 \
+  --memory 2Gi
 ```
 
 > Las sustituciones van separadas por comas y sin espacios alrededor del `=` — si algún valor llegara a contener una coma (no debería, para una API key o un host), rómpelo en un `cloudbuild.yaml` con variables de entorno en vez de `--substitutions`.
