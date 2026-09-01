@@ -5,12 +5,12 @@ Guía paso a paso para desplegar los 3 componentes de este proyecto que sirven a
 ```
                     ┌─────────────────────┐
   Usuario ────────► │  01_agent-app        │  (Next.js, Cloud Run)
-                    │  (Firebase Auth)     │
+                    │  (Identity Platform) │
                     └──────────┬───────────┘
-                               │ HTTPS + Bearer <Firebase ID token>
+                               │ HTTPS + Bearer <Identity Platform ID token>
                                ▼
                     ┌─────────────────────┐
-                    │  GCP API Gateway     │  valida el JWT de Firebase
+                    │  GCP API Gateway     │  valida el JWT de Identity Platform
                     │  (openapi_gateway.yml)│ ANTES de reenviar la petición
                     └──────────┬───────────┘
                                │ solo el Gateway puede invocar
@@ -35,6 +35,21 @@ Guía paso a paso para desplegar los 3 componentes de este proyecto que sirven a
 
 ---
 
+## Prerrequisitos
+
+Antes de ejecutar la guía necesitas:
+
+- Un proyecto GCP con **facturación habilitada** y permisos para habilitar APIs, crear repositorios de Artifact Registry, Service Accounts, bindings IAM, servicios Cloud Run, recursos de API Gateway y templates de Model Armor.
+- `gcloud` autenticado (`gcloud auth login`) y Docker en ejecución. La ruta recomendada es **Bash o Google Cloud Shell**, porque el render del OpenAPI usa `envsubst`. En Windows, los despliegues de los servicios también incluyen scripts `.ps1` y `.bat`, pero la creación de recursos de esta guía está expresada en Bash/Cloud Shell.
+- Identity Platform habilitado en el proyecto y al menos un proveedor de identidad configurado. La Fase 1 incluye la inicialización de Identity Platform; por claridad didáctica, la activación del proveedor y la creación del usuario de laboratorio se hacen desde Google Cloud Console.
+- Los servicios externos y secretos indicados en `02_agent_api/.env.example` y `03_mcp_server/.env.example`: PostgreSQL, OpenAI y Groq para Agent API; OpenAI, Qdrant y SuperheroAPI para las herramientas MCP que los utilizan. Neon y LangSmith son opcionales. No reemplaces los ejemplos `sk-...`, `gsk_...` o `your-...` por valores ficticios en producción.
+
+> Esta guía almacena API keys y credenciales en **Secret Manager**. Cloud Run recibe referencias a secretos, no sus valores como variables planas ni argumentos visibles.
+
+> Ejecuta todos los bloques desde la **raíz del repositorio** `demo_rag_agent`, salvo cuando el propio bloque incluya un `cd`. Si cierras Cloud Shell, vuelve a ejecutar la Fase 0 para recuperar las variables de la sesión.
+
+---
+
 ## 0. Variables (definir una sola vez, reusadas en todas las fases)
 
 **Bash:**
@@ -43,9 +58,16 @@ export PROJECT_ID="tu-proyecto-gcp"
 export REGION="us-central1"
 export AR_REPOSITORY="repo"
 
+# Principal que ejecuta los comandos y adjuntará SERVICE_SA a Cloud Run/API
+# Gateway. Si gcloud usa una cuenta humana, este valor se obtiene así:
+export DEPLOYER_ACCOUNT="$(gcloud config get-value account)"
+export DEPLOYER_MEMBER="user:${DEPLOYER_ACCOUNT}"
+# Si despliegas desde otra SA, usa en cambio:
+# export DEPLOYER_MEMBER="serviceAccount:mi-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
+
 # Service Account única — identidad de runtime de 02_agent_api (llama a Model
 # Armor y a 03_mcp_server) Y también la que usa el Gateway para invocar
-# 02_agent_api (ver Fase 1.2)
+# 02_agent_api (ver Fase 1.4)
 export SERVICE_SA_NAME="agent-b-runtime"
 export SERVICE_SA="${SERVICE_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
@@ -53,21 +75,25 @@ export SERVICE_SA="${SERVICE_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 export MODEL_ARMOR_TEMPLATE_ID="agent-api-template"
 
 # 03_mcp_server (Cloud Run)
-export MCP_SERVER_SERVICE="03-mcp-server-service"
+export MCP_SERVER_SERVICE="mcp-server-service"
 
 # 02_agent_api (Cloud Run)
-export AGENT_API_SERVICE="02-agent-api-service"
+export AGENT_API_SERVICE="agent-api-service"
 
 # API Gateway
 export GATEWAY_API_ID="agent-api-gw"
 export GATEWAY_CONFIG_ID="agent-api-gw-config-v1"
 export GATEWAY_ID="agent-api-gateway"
 
-# Firebase (mismo proyecto que PROJECT_ID en el caso típico)
-export FIREBASE_PROJECT_ID="${PROJECT_ID}"
+# Identity Platform. El frontend usa el SDK web de Firebase porque es el SDK
+# cliente oficial compatible con Identity Platform; la autenticación y los
+# usuarios pertenecen a Identity Platform de GCP.
+export IDENTITY_PLATFORM_PROJECT_ID="${PROJECT_ID}"
+export IDENTITY_PLATFORM_API_KEY="PEGA_AQUI_LA_API_KEY_WEB"
+export IDENTITY_PLATFORM_AUTH_DOMAIN="${PROJECT_ID}.firebaseapp.com"
 
 # 01_agent-app (Cloud Run)
-export AGENT_APP_SERVICE="01-agent-app-service"
+export AGENT_APP_SERVICE="agent-app-service"
 ```
 
 **PowerShell:**
@@ -75,25 +101,31 @@ export AGENT_APP_SERVICE="01-agent-app-service"
 $PROJECT_ID = "tu-proyecto-gcp"
 $REGION = "us-central1"
 $AR_REPOSITORY = "repo"
+$DEPLOYER_ACCOUNT = gcloud config get-value account
+$DEPLOYER_MEMBER = "user:$DEPLOYER_ACCOUNT" # usa serviceAccount:... si corresponde
 $SERVICE_SA_NAME = "agent-b-runtime"
 $SERVICE_SA = "$SERVICE_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
 $MODEL_ARMOR_TEMPLATE_ID = "agent-api-template"
-$MCP_SERVER_SERVICE = "03-mcp-server-service"
-$AGENT_API_SERVICE = "02-agent-api-service"
+$MCP_SERVER_SERVICE = "mcp-server-service"
+$AGENT_API_SERVICE = "agent-api-service"
 $GATEWAY_API_ID = "agent-api-gw"
 $GATEWAY_CONFIG_ID = "agent-api-gw-config-v1"
 $GATEWAY_ID = "agent-api-gateway"
-$FIREBASE_PROJECT_ID = $PROJECT_ID
-$AGENT_APP_SERVICE = "01-agent-app-service"
+$IDENTITY_PLATFORM_PROJECT_ID = $PROJECT_ID
+$IDENTITY_PLATFORM_API_KEY = "PEGA_AQUI_LA_API_KEY_WEB"
+$IDENTITY_PLATFORM_AUTH_DOMAIN = "$PROJECT_ID.firebaseapp.com"
+$AGENT_APP_SERVICE = "agent-app-service"
 ```
+
+> Los nombres de Cloud Run deben comenzar con una letra. Los nombres de las carpetas (`01_`, `02_`, `03_`) no se pueden reutilizar literalmente como nombres de servicio.
 
 ---
 
-## Fase 1 — Habilitar APIs, crear la Service Account y el template de Model Armor
+## Fase 1 — Preparar servicios, Artifact Registry, IAM y Model Armor
 
 Todo lo de esta fase es independiente de que exista ningún Cloud Run — se hace una sola vez, de entrada.
 
-### 1.1. Habilitar APIs y autenticar Docker
+### 1.1. Seleccionar el proyecto y habilitar APIs
 
 ```bash
 gcloud config set project "$PROJECT_ID"
@@ -105,12 +137,54 @@ gcloud services enable \
   servicemanagement.googleapis.com \
   servicecontrol.googleapis.com \
   modelarmor.googleapis.com \
-  iam.googleapis.com
+  iam.googleapis.com \
+  identitytoolkit.googleapis.com \
+  secretmanager.googleapis.com
+
+# Esperar a que la habilitación termine antes de crear los recursos siguientes.
+gcloud services list --enabled --project="$PROJECT_ID"
+```
+
+### 1.2. Inicializar Identity Platform
+
+Este bloque activa Identity Platform en el proyecto. Si ya estaba inicializado, una respuesta indicando que la configuración existe se puede ignorar.
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" \
+  -H "X-Goog-User-Project: ${PROJECT_ID}" \
+  -d '{}' \
+  "https://identitytoolkit.googleapis.com/v2/projects/${PROJECT_ID}/identityPlatform:initializeAuth"
+```
+
+> Cada alumno despliega **su propio proyecto GCP** de punta a punta (su propio Identity Platform, su propio Gateway, sus propios Cloud Run) — no es un backend compartido entre alumnos. Por eso alcanza con **una sola cuenta de prueba** por despliegue: el frontend de `01_agent-app` solo tiene login (`signInWithEmailAndPassword`, ver `app/_lib/auth-context.tsx`), no un flujo de registro — así que esa cuenta hay que crearla a mano en este paso, dentro de tu propio proyecto.
+
+Ahora realiza estos tres pasos en **Google Cloud Console → Identity Platform**:
+
+1. En **Providers**, habilita Email/Password.
+2. En **Users**, crea **una** cuenta de prueba (ej. `test@correo.com` con una password a elección) — es la única credencial con la que vas a loguearte en tu propio despliegue; no hace falta una por alumno porque cada uno tiene su propio proyecto.
+3. En la configuración de la aplicación web, copia la **API key** y colócala en `IDENTITY_PLATFORM_API_KEY` de la Fase 0. Para el laboratorio se usa `IDENTITY_PLATFORM_AUTH_DOMAIN=${PROJECT_ID}.firebaseapp.com`.
+
+> Aunque el paquete del frontend y sus variables se llaman `firebase`/`NEXT_PUBLIC_FIREBASE_*`, no se está usando Firebase Authentication como producto separado. Identity Platform utiliza ese SDK cliente y emite tokens con issuer `https://securetoken.google.com/$PROJECT_ID`, que API Gateway valida.
+
+### 1.3. Crear el repositorio Docker y autenticar Docker
+
+Artifact Registry no crea el repositorio automáticamente durante `docker push`. En un proyecto nuevo hay que crearlo primero:
+
+```bash
+gcloud artifacts repositories create "$AR_REPOSITORY" \
+  --project="$PROJECT_ID" \
+  --repository-format=docker \
+  --location="$REGION" \
+  --description="Imágenes de demo_rag_agent"
 
 gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 ```
 
-### 1.2. Crear la Service Account única y darle los permisos que ya se pueden otorgar
+Si el repositorio ya existe, omite el comando `repositories create` y conserva el mismo nombre y región en todos los scripts.
+
+### 1.4. Crear la Service Account única y darle los permisos que ya se pueden otorgar
 
 Esta SA cumple tres roles: identidad de runtime de `02_agent_api` (para llamar a Model Armor y para autenticarse contra `03_mcp_server`), y la identidad que usa el **Gateway** para invocar `02_agent_api`. Todo lo que no depende de que un Cloud Run exista se le da acá:
 
@@ -121,13 +195,30 @@ gcloud iam service-accounts create "$SERVICE_SA_NAME" \
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:${SERVICE_SA}" \
   --role="roles/modelarmor.user"
+
+# El principal que ejecuta gcloud necesita iam.serviceAccounts.actAs para
+# adjuntar esta SA a los Cloud Run y al API config del Gateway.
+gcloud iam service-accounts add-iam-policy-binding "$SERVICE_SA" \
+  --project="$PROJECT_ID" \
+  --member="$DEPLOYER_MEMBER" \
+  --role="roles/iam.serviceAccountUser"
+
+# El usuario que ejecuta el laboratorio crea y administra el template.
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="$DEPLOYER_MEMBER" \
+  --role="roles/modelarmor.admin"
 ```
 
 > `roles/run.invoker` (sobre `03_mcp_server` y sobre `02_agent_api`) se agrega en las Fases 2.3 y 3.3, apenas cada servicio exista — no se puede otorgar antes.
 
-### 1.3. Crear el template de Model Armor
+### 1.5. Crear el template de Model Armor
 
 ```bash
+# Las operaciones sobre templates requieren el endpoint regional. Sin esta
+# línea, el endpoint global puede devolver un 403 engañoso aunque IAM esté bien.
+gcloud config set api_endpoint_overrides/modelarmor \
+  "https://modelarmor.${REGION}.rep.googleapis.com/"
+
 gcloud model-armor templates create "$MODEL_ARMOR_TEMPLATE_ID" \
   --project="$PROJECT_ID" \
   --location="$REGION" \
@@ -157,7 +248,7 @@ El modo básico de arriba solo detecta y bloquea. Para que el filtro `sdp` devue
 Sin esto, el filtro `sdp` en modo básico igual bloquea datos sensibles detectados (vía `_extract_deidentified_text` → sin `deidentify_result` disponible → cae a bloqueo) — solo no los deja pasar enmascarados.
 </details>
 
-Con esto termina la Fase 1: ya tenemos la SA, sus permisos de Model Armor, y el template.
+Con esto termina la Fase 1: ya están habilitadas las APIs, existe el repositorio Docker, y tenemos la SA, sus permisos de Model Armor y el template.
 
 ---
 
@@ -167,18 +258,35 @@ Va primero porque `02_agent_api` necesita su URL antes de poder desplegarse.
 
 ### 2.1. Completar tu `.env` de `03_mcp_server`
 
-Ver `03_mcp_server/.env.example` (Qdrant, SuperheroAPI, OpenAI para embeddings de `retrieve_documents`). No necesita ninguna variable nueva para el transporte HTTP — Cloud Run inyecta `PORT` automáticamente (`src/utils/environment.py::MCP_SERVER_PORT`).
+Crea el archivo a partir del ejemplo y reemplaza los valores marcados:
+
+```bash
+cp 03_mcp_server/.env.example 03_mcp_server/.env
+nano 03_mcp_server/.env
+```
+
+Completa Qdrant, SuperheroAPI y OpenAI para embeddings de `retrieve_documents`. No necesita ninguna variable nueva para el transporte HTTP — Cloud Run inyecta `PORT` automáticamente (`src/utils/environment.py::MCP_SERVER_PORT`). Guarda con `Ctrl+O`, Enter y sal de `nano` con `Ctrl+X`.
 
 ### 2.2. Build + deploy
 
-Completa el encabezado de `03_mcp_server/scripts/build-deploy.{sh,ps1,bat}` con los mismos valores de `$PROJECT_ID`/`$AR_REPOSITORY`/`$MCP_SERVER_SERVICE` de la Fase 0, y además:
-```
-RUNTIME_SERVICE_ACCOUNT="<el $SERVICE_SA de la Fase 0>"
-```
-
 ```bash
-cd 03_mcp_server/scripts
-./build-deploy.sh   # o build-deploy.ps1 en PowerShell
+export IMAGE_TAG="$(date +'%Y%m%d-%H%M%S')"
+export MCP_SERVER_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/03-mcp-server:${IMAGE_TAG}"
+
+docker build -t "$MCP_SERVER_IMAGE" 03_mcp_server
+docker push "$MCP_SERVER_IMAGE"
+
+export MCP_ENV_VARS="$(grep -vE '^\s*(#|$)' 03_mcp_server/.env | paste -sd, -)"
+
+gcloud run deploy "$MCP_SERVER_SERVICE" \
+  --project="$PROJECT_ID" \
+  --image="$MCP_SERVER_IMAGE" \
+  --region="$REGION" \
+  --platform=managed \
+  --no-allow-unauthenticated \
+  --service-account="$SERVICE_SA" \
+  --port=8080 \
+  --set-env-vars="$MCP_ENV_VARS"
 ```
 
 Despliega con `--no-allow-unauthenticated` — nadie fuera de `02_agent_api` (con la SA + `run.invoker` del siguiente paso) puede invocarlo.
@@ -196,7 +304,11 @@ gcloud run services add-iam-policy-binding "$MCP_SERVER_SERVICE" \
   --role="roles/run.invoker"
 ```
 
-La URL completa que usará `02_agent_api` es `${MCP_SERVER_URL}/mcp` (el endpoint streamable-http, path por defecto de FastMCP).
+La URL completa que usará `02_agent_api` es `${MCP_SERVER_URL}/mcp` (endpoint streamable-http de FastMCP, **sin** barra final — ver nota debajo).
+
+> **`03_mcp_server/requirements.txt` fija `mcp[cli]>=1.13.0,<2` a propósito** (no uses `mcp[cli]==1.8.0`, una versión vieja que no propaga `structuredContent` correctamente hacia `langchain-mcp-adapters` en `02_agent_api` — con ella, `retrieve_documents` y tools como `get_pokemon` responden bien pero el campo `sources` de `/api/chat` queda vacío o con el JSON crudo en `content`). Tampoco subas a `mcp[cli]>=2`: es un major con breaking changes (`FastMCP` se renombró a `MCPServer`) que ni siquiera arranca contra este código.
+>
+> **Por qué la URL va sin barra final con esta versión** (al revés de lo que podrías esperar): el endpoint registrado por FastMCP es `/mcp` (sin slash). Pedir `/mcp/` (con slash) devuelve un `307` cuyo header `Location` usa `http://` en vez de `https://` — y ese downgrade de esquema hace que `httpx` (usado por el cliente MCP) **descarte el header `Authorization` al seguir la redirección**, por diseño de seguridad estándar (tratar el cambio de esquema como cambio de origen). El resultado es una segunda petición sin token, que Cloud Run rechaza con `403 Forbidden` — un error que parece de IAM/permisos pero es en realidad de la barra final. Pedir `/mcp` directo evita el redirect por completo.
 
 ---
 
@@ -204,25 +316,76 @@ La URL completa que usará `02_agent_api` es `${MCP_SERVER_URL}/mcp` (el endpoin
 
 ### 3.1. Completar tu `.env` de `02_agent_api`
 
+```bash
+cp 02_agent_api/.env.example 02_agent_api/.env
+nano 02_agent_api/.env
+```
+
+Completa primero OpenAI, PostgreSQL y Groq. Luego reemplaza las variables de integración por estos valores reales:
+
 ```
 GUARDRAIL_ENGINE=model_armor
 MODEL_ARMOR_PROJECT_ID=<tu PROJECT_ID>
 MODEL_ARMOR_LOCATION=<tu REGION>
-MODEL_ARMOR_TEMPLATE_ID=<el que creaste en la Fase 1.3>
+MODEL_ARMOR_TEMPLATE_ID=<el que creaste en la Fase 1.5>
 DEMO_MCP_SERVER_URL=<$MCP_SERVER_URL de la Fase 2.3>/mcp
 ```
-`GOOGLE_APPLICATION_CREDENTIALS` debe quedar **vacío** — el script `build-deploy.{sh,ps1,bat}` ya la excluye del deploy a propósito (la SA de la Fase 1.2 reemplaza esta variable, tanto para Model Armor como para el ID token hacia `03_mcp_server`).
+
+Por ejemplo, si el comando anterior mostró `https://mcp-server-service-abc-uc.a.run.app`, escribe `DEMO_MCP_SERVER_URL=https://mcp-server-service-abc-uc.a.run.app/mcp`. **Sin barra final** — ver la nota de la Fase 2.3 sobre por qué la barra final rompe la autenticación con la versión de `mcp` que usa este proyecto. Guarda el archivo y vuelve al directorio raíz del repositorio antes de ejecutar el siguiente bloque.
+`GOOGLE_APPLICATION_CREDENTIALS` debe quedar **vacío** — en Cloud Run la SA de la Fase 1.4 reemplaza esa credencial local, tanto para Model Armor como para obtener el ID token hacia `03_mcp_server`.
 
 ### 3.2. Build + deploy
 
-Completa el encabezado de `02_agent_api/scripts/build-deploy.{sh,ps1,bat}` con los mismos valores de `$PROJECT_ID`/`$AR_REPOSITORY`/`$AGENT_API_SERVICE` de la Fase 0, y además:
-```
-RUNTIME_SERVICE_ACCOUNT="<el $SERVICE_SA de la Fase 0>"
-```
+> **Validación real del laboratorio:** este contenedor carga spaCy, guardrails, LangChain y clientes MCP durante el arranque — con `--memory=1Gi` el arranque es inestable (varias revisiones fallaron por esto durante la validación de esta guía). Usa `--cpu=4 --memory=4Gi`, que es lo que quedó probado y estable de punta a punta. Si Cloud Run informa que no escuchó `PORT=8080`, no aumentes el timeout del Gateway a ciegas: revisa primero los logs de la revisión y prueba la misma imagen con `docker run`. Las integraciones opcionales Neon MCP y LangSmith pueden omitirse del runtime sin quitar `DATABASE_URL` ni el MCP privado principal, pero si las incluyes revisa que **las 5** queden en `--set-secrets` — omitir una silenciosamente la deja sin conectar, sin ningún error visible.
 
 ```bash
-cd 02_agent_api/scripts
-./build-deploy.sh   # o build-deploy.ps1 en PowerShell
+export IMAGE_TAG="$(date +'%Y%m%d-%H%M%S')"
+export AGENT_API_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/02-agent-api:${IMAGE_TAG}"
+
+docker build -t "$AGENT_API_IMAGE" 02_agent_api
+docker push "$AGENT_API_IMAGE"
+
+# Crea los secretos una vez, agrega la versión real desde .env y concede a la
+# SA acceso solo a cada secreto (no a todos los secretos del proyecto).
+for SPEC in \
+  OPENAI_API_KEY:agent-openai-api-key \
+  DATABASE_URL:agent-database-url \
+  NEON_API_KEY:agent-neon-api-key \
+  GROQ_API_KEY:agent-groq-api-key \
+  LANGSMITH_API_KEY:agent-langsmith-api-key; do
+  KEY="${SPEC%%:*}"
+  SECRET_ID="${SPEC#*:}"
+  gcloud secrets describe "$SECRET_ID" --project="$PROJECT_ID" >/dev/null 2>&1 || \
+    gcloud secrets create "$SECRET_ID" --project="$PROJECT_ID" --replication-policy=automatic
+  VALUE="$(grep -m1 "^${KEY}=" 02_agent_api/.env | cut -d= -f2-)"
+  printf %s "$VALUE" | gcloud secrets versions add "$SECRET_ID" \
+    --project="$PROJECT_ID" --data-file=-
+  unset VALUE
+  gcloud secrets add-iam-policy-binding "$SECRET_ID" \
+    --project="$PROJECT_ID" \
+    --member="serviceAccount:${SERVICE_SA}" \
+    --role="roles/secretmanager.secretAccessor"
+done
+
+# Solo configuración no sensible. También se omite la ruta local de ADC.
+grep -vE '^\s*(#|$|OPENAI_API_KEY=|DATABASE_URL=|NEON_API_KEY=|GROQ_API_KEY=|LANGSMITH_API_KEY=|GOOGLE_APPLICATION_CREDENTIALS=)' \
+  02_agent_api/.env > .agent-cloudrun.env
+
+gcloud run deploy "$AGENT_API_SERVICE" \
+  --project="$PROJECT_ID" \
+  --image="$AGENT_API_IMAGE" \
+  --region="$REGION" \
+  --platform=managed \
+  --no-allow-unauthenticated \
+  --service-account="$SERVICE_SA" \
+  --port=8080 \
+  --cpu=4 \
+  --memory=4Gi \
+  --timeout=300 \
+  --env-vars-file=.agent-cloudrun.env \
+  --set-secrets='OPENAI_API_KEY=agent-openai-api-key:latest,DATABASE_URL=agent-database-url:latest,NEON_API_KEY=agent-neon-api-key:latest,GROQ_API_KEY=agent-groq-api-key:latest,LANGSMITH_API_KEY=agent-langsmith-api-key:latest'
+
+rm .agent-cloudrun.env
 ```
 
 Despliega con `--no-allow-unauthenticated` y `--service-account "$RUNTIME_SERVICE_ACCOUNT"` — el Cloud Run queda cerrado, solo el Gateway podrá invocarlo.
@@ -250,7 +413,9 @@ echo "$CLOUD_RUN_URL"
 
 ### 4.2. Renderizar `openapi_gateway.yml` (plantilla parametrizada)
 
-`02_agent_api/openapi_gateway.yml` usa `${CLOUD_RUN_URL}`, `${GATEWAY_HOST}` y `${FIREBASE_PROJECT_ID}` — Google API Gateway sube el YAML tal cual (no soporta variables en runtime), así que hay que resolverlas antes con `envsubst`. `GATEWAY_HOST` recién se conoce después de crear el gateway (paso 4.3) — para esta primera subida usa un placeholder cualquiera (el `servers.url` es informativo, no afecta el ruteo real):
+`02_agent_api/openapi_gateway.yml` usa `${CLOUD_RUN_URL}`, `${GATEWAY_HOST}` y `${IDENTITY_PLATFORM_PROJECT_ID}` — Google API Gateway sube el YAML tal cual (no soporta variables en runtime), así que hay que resolverlas antes con `envsubst`. `GATEWAY_HOST` recién se conoce después de crear el gateway (paso 4.3) — para esta primera subida usa un placeholder cualquiera (el `servers.url` es informativo, no afecta el ruteo real):
+
+La plantilla configura `deadline: 120.0` para el backend. Es necesario porque la primera petición puede inicializar el agente, la conexión MCP y los guardrails; con el límite predeterminado la prueba real puede terminar en `504 upstream request timeout`.
 
 ```bash
 export GATEWAY_HOST="placeholder.gateway.dev"
@@ -300,9 +465,9 @@ export AGENT_APP_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/
 
 docker build \
   --build-arg NEXT_PUBLIC_API_BASE="https://${GATEWAY_HOST}" \
-  --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="<tu Firebase API key>" \
-  --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="${FIREBASE_PROJECT_ID}.firebaseapp.com" \
-  --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="${FIREBASE_PROJECT_ID}" \
+  --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="${IDENTITY_PLATFORM_API_KEY}" \
+  --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="${IDENTITY_PLATFORM_AUTH_DOMAIN}" \
+  --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="${IDENTITY_PLATFORM_PROJECT_ID}" \
   -t "$AGENT_APP_IMAGE" .
 
 docker push "$AGENT_APP_IMAGE"
@@ -317,7 +482,7 @@ gcloud run deploy "$AGENT_APP_SERVICE" \
 cd ..
 ```
 
-`01_agent-app` sí queda público (`--allow-unauthenticated`) — es la app que ve el usuario final; la protección real está en que `02_agent_api` solo acepta al Gateway (y `03_mcp_server` solo acepta a `02_agent_api`), y el Gateway solo reenvía peticiones con un JWT de Firebase válido.
+`01_agent-app` sí queda público (`--allow-unauthenticated`) — es la app que ve el usuario final; la protección real está en que `02_agent_api` solo acepta al Gateway (y `03_mcp_server` solo acepta a `02_agent_api`), y el Gateway solo reenvía peticiones con un JWT válido de Identity Platform.
 
 ---
 
@@ -328,7 +493,7 @@ cd ..
 # Sin token: debe dar 401
 curl -i "https://${GATEWAY_HOST}/api/errors"
 
-# Con token de Firebase (reemplaza <ID_TOKEN>, ej. desde el frontend logueado)
+# Con token de Identity Platform (reemplaza <ID_TOKEN>, obtenido al iniciar sesión)
 curl -i "https://${GATEWAY_HOST}/api/errors" -H "Authorization: Bearer <ID_TOKEN>"
 ```
 
@@ -337,10 +502,98 @@ curl -i "https://${GATEWAY_HOST}/api/errors" -H "Authorization: Bearer <ID_TOKEN
 curl -i "${CLOUD_RUN_URL}/api/errors"
 ```
 
-**3. Confirmar que Model Armor está activo (no en fallback local)**: revisa los logs de `02_agent_api` en Cloud Logging — al arrancar debe aparecer el pipeline con `ModelArmorMiddleware` y **no** el warning `"No se pudo inicializar ModelArmorMiddleware"` ni `"falta MODEL_ARMOR_PROJECT_ID/MODEL_ARMOR_TEMPLATE_ID"` (ver `guardrails/__init__.py`). Si aparece, revisa que la SA (Fase 1.2) tenga `roles/modelarmor.user`.
+**3. Confirmar que Model Armor está activo (no en fallback local)**: revisa los logs de `02_agent_api` en Cloud Logging — al arrancar debe aparecer el pipeline con `ModelArmorMiddleware` y **no** el warning `"No se pudo inicializar ModelArmorMiddleware"` ni `"falta MODEL_ARMOR_PROJECT_ID/MODEL_ARMOR_TEMPLATE_ID"` (ver `guardrails/__init__.py`). Si aparece, revisa que la SA (Fase 1.4) tenga `roles/modelarmor.user`.
+
+**Si Cloud Run falla antes de escuchar el puerto**, identifica la revisión y lee sus logs antes de crear otra:
+
+```bash
+gcloud run revisions list --service="$AGENT_API_SERVICE" --region="$REGION"
+gcloud run services logs read "$AGENT_API_SERVICE" --region="$REGION" --limit=100
+```
+
+Un `504 upstream request timeout` en Gateway junto con un `503` y `failed the readiness check` en Cloud Run indica un cold start fallido del contenedor, no un error de autenticación del Gateway.
 
 **4. Confirmar que 02_agent_api conectó a 03_mcp_server por HTTP**: en los logs, buscar `"Demo MCP server conectado"` (log de `main.py`). Si en cambio aparece `"Error conectando al demo MCP server"`:
-   - Revisa que `DEMO_MCP_SERVER_URL` termine en `/mcp` y apunte a la URL real de la Fase 2.3.
-   - Si el error menciona 401/403: la SA no tiene `roles/run.invoker` sobre `$MCP_SERVER_SERVICE` (Fase 2.3), o `GoogleIDTokenAuth` no pudo obtener el ID token (revisa que la Cloud Run de `02_agent_api` tenga `--service-account "$SERVICE_SA"` asignado, Fase 3.2) — busca el warning `"No se pudo obtener ID token de Google"` en los logs (`src/utils/gcp_auth.py`). El endpoint se configura con `/mcp`, pero el código usa automáticamente la URL base del servicio como audiencia del token, tal como exige Cloud Run.
+   - Revisa que `DEMO_MCP_SERVER_URL` termine en `/mcp` (sin barra final — ver Fase 2.3) y apunte a la URL real de la Fase 2.3.
+   - Si el error menciona 401/403: la causa más común es la barra final en `DEMO_MCP_SERVER_URL` (Fase 2.3 explica por qué revienta la autenticación). Si ya la sacaste y sigue, revisa que la SA tenga `roles/run.invoker` sobre `$MCP_SERVER_SERVICE`, o que `GoogleIDTokenAuth` haya podido obtener el ID token (revisa que la Cloud Run de `02_agent_api` tenga `--service-account "$SERVICE_SA"` asignado, Fase 3.2) — busca el warning `"No se pudo obtener ID token de Google"` en los logs (`src/utils/gcp_auth.py`).
+   - Si la conexión queda establecida pero el campo `sources` de `/api/chat` llega vacío para preguntas que usaron `retrieve_documents`: confirma que `03_mcp_server/requirements.txt` tenga `mcp[cli]>=1.13.0,<2` (no la versión `==1.8.0`, que no propaga `structuredContent`).
 
-**5. Probar el flujo completo**: abrir la URL de `$AGENT_APP_SERVICE`, loguearse con Firebase, mandar un mensaje, y confirmar que llega respuesta (revisando en Network del navegador que la request va a `https://$GATEWAY_HOST/api/chat`, no al Cloud Run directo).
+**5. Probar el flujo completo por `curl`, sin depender del navegador**: obtén un ID token real iniciando sesión con el usuario de prueba (Fase 1.2) contra la REST API de Identity Platform, y úsalo contra el Gateway. Esto ejercita la cadena completa (Gateway → `02_agent_api` → guardrails → `03_mcp_server`) exactamente igual que lo haría el frontend:
+
+```bash
+export ID_TOKEN=$(curl -s -X POST \
+  "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${IDENTITY_PLATFORM_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"<email del usuario de prueba>","password":"<su password>","returnSecureToken":true}' \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['idToken'])")
+
+curl -i -X POST "https://${GATEWAY_HOST}/api/chat" \
+  -H "Authorization: Bearer ${ID_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"What is the capital of Chile?","user":"smoke-test"}'
+```
+
+Debe responder `200` con un `answer` real (la primera llamada puede tardar hasta el `deadline: 120.0` del Gateway si el contenedor estaba en cold start). Si el `curl` con caracteres acentuados/UTF-8 en `question` devuelve `400 There was an error parsing the body`, es un problema de encoding del shell al armar el JSON (usa `--data-binary @archivo.json` con el payload guardado en un archivo), no un error del servicio.
+
+**6. Probar el flujo completo desde el navegador**: abrir la URL de `$AGENT_APP_SERVICE`, iniciar sesión con el usuario de Identity Platform, mandar un mensaje y confirmar que llega respuesta (en Network del navegador la request debe ir a `https://$GATEWAY_HOST/api/chat`, no al Cloud Run directo).
+
+---
+
+## Limpieza — eliminar todo lo desplegado
+
+Para volver a ejecutar el laboratorio desde cero (o simplemente para no seguir pagando por los recursos), esto borra todo lo que creó esta guía, en el orden correcto de dependencias. Ejecuta este bloque desde la misma terminal donde definiste las variables de la Fase 0 (si la cerraste, vuelve a exportarlas primero).
+
+```bash
+# 1. API Gateway: primero el gateway, luego todos sus api-configs, al final la API.
+gcloud api-gateway gateways delete "$GATEWAY_ID" \
+  --location="$REGION" --project="$PROJECT_ID" --quiet
+
+for CFG in $(gcloud api-gateway api-configs list --api="$GATEWAY_API_ID" \
+  --project="$PROJECT_ID" --format="value(name.basename())"); do
+  gcloud api-gateway api-configs delete "$CFG" \
+    --api="$GATEWAY_API_ID" --project="$PROJECT_ID" --quiet
+done
+
+gcloud api-gateway apis delete "$GATEWAY_API_ID" --project="$PROJECT_ID" --quiet
+
+# 2. Los 3 Cloud Run.
+gcloud run services delete "$AGENT_APP_SERVICE" --region="$REGION" --project="$PROJECT_ID" --quiet
+gcloud run services delete "$AGENT_API_SERVICE" --region="$REGION" --project="$PROJECT_ID" --quiet
+gcloud run services delete "$MCP_SERVER_SERVICE" --region="$REGION" --project="$PROJECT_ID" --quiet
+
+# 3. Los 5 secretos de Secret Manager (Fase 3.2).
+for SECRET_ID in agent-openai-api-key agent-database-url agent-neon-api-key \
+  agent-groq-api-key agent-langsmith-api-key; do
+  gcloud secrets delete "$SECRET_ID" --project="$PROJECT_ID" --quiet
+done
+
+# 4. El template de Model Armor (requiere el mismo endpoint regional de la Fase 1.5).
+gcloud config set api_endpoint_overrides/modelarmor \
+  "https://modelarmor.${REGION}.rep.googleapis.com/"
+gcloud model-armor templates delete "$MODEL_ARMOR_TEMPLATE_ID" \
+  --project="$PROJECT_ID" --location="$REGION" --quiet
+
+# 5. Los bindings IAM a nivel de proyecto (Fase 1.4) — no se borran solos al
+# eliminar la SA, quedarían como entradas huérfanas "deleted:serviceAccount:...".
+gcloud projects remove-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${SERVICE_SA}" \
+  --role="roles/modelarmor.user" --quiet
+gcloud projects remove-iam-policy-binding "$PROJECT_ID" \
+  --member="$DEPLOYER_MEMBER" \
+  --role="roles/modelarmor.admin" --quiet
+
+# 6. La Service Account (esto también elimina el binding run.invoker que tenía
+# sobre cada Cloud Run y el iam.serviceAccountUser que tenía el deployer sobre ella).
+gcloud iam service-accounts delete "$SERVICE_SA" --project="$PROJECT_ID" --quiet
+
+# 7. El repositorio de Artifact Registry, con todas las imágenes que subiste.
+gcloud artifacts repositories delete "$AR_REPOSITORY" \
+  --project="$PROJECT_ID" --location="$REGION" --quiet
+
+# 8. Artefacto local generado por la Fase 4.2 (no es un recurso de GCP).
+rm -f 02_agent_api/openapi_gateway.rendered.yml
+```
+
+> **Identity Platform no se elimina con `gcloud`** (no hay un comando de "desinicializar" el proyecto para este producto). Si quieres borrar solo la cuenta de prueba de la Fase 1.2, hazlo desde **Google Cloud Console → Identity Platform → Users**. Dejar Identity Platform habilitado sin usuarios no genera costo.
+
+> Los archivos `02_agent_api/.env` y `03_mcp_server/.env` (con tus API keys) **no se tocan** — son locales y los reutilizas tal cual la próxima vez que despliegues, salvo que cambies de proyecto GCP (en ese caso, `MODEL_ARMOR_PROJECT_ID` y `DEMO_MCP_SERVER_URL` van a cambiar).
