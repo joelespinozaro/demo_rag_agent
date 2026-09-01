@@ -198,6 +198,14 @@
     .preview-derived b{font-family:var(--font-mono);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;min-width:230px;color:var(--human)}
     .preview-derived span{font-family:var(--font-mono);color:var(--ink);word-break:break-all}
 
+    /* ============ INPUT INLINE (valores que se obtienen a mitad de guía) ============ */
+    .inlinevar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--tool-tint);border:1px solid var(--tool-tint-strong);border-radius:var(--radius);padding:12px 16px;margin:14px 0}
+    .inlinevar label{font-family:var(--font-mono);font-weight:700;font-size:.78rem;color:var(--tool);flex:none}
+    .inlinevar input{flex:1;min-width:220px;border:1px solid var(--tool-tint-strong);border-radius:9px;padding:8px 10px;font-family:var(--font-mono);font-size:12.5px;background:var(--paper-raised);color:var(--ink)}
+    .inlinevar input:focus{outline:2px solid var(--tool);outline-offset:1px}
+    .inlinevar input.filled{border-color:var(--tool)}
+    .inlinevar small{flex-basis:100%;color:var(--ink-dim);font-size:.78rem}
+
     @media(max-width:900px){.vform{grid-template-columns:1fr 1fr}}
     @media(max-width:900px){.layout{grid-template-columns:1fr}.side{position:relative;top:auto;max-height:none;margin-bottom:24px;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center}.side strong{width:100%}.side a{display:inline-block}.side-progress{width:100%}.iam{grid-template-columns:1fr}.iam-mid{transform:rotate(90deg)}.vform{grid-template-columns:1fr}.topnav-inner{flex-wrap:wrap;height:auto;padding:8px 20px}}
     @media print{body{background:#fff;font-size:11px}.hero{padding:24px}.layout{display:block}.side,.copy,.top,.vform,.resetbtn,.topnav,.expand-btn{display:none}.card,figure.diagram{box-shadow:none}.codebox pre{white-space:pre-wrap}}
@@ -268,7 +276,7 @@
       <a href="#problemas">Problemas</a>
       <a href="#limpieza">Limpieza</a>
     </div>
-    <div class="nav-progress"><span id="sideProgressLabel">0/12 vars</span><div class="bar"><div class="fill" id="sideProgressFill"></div></div></div>
+    <div class="nav-progress"><span id="sideProgressLabel">0/15 vars</span><div class="bar"><div class="fill" id="sideProgressFill"></div></div></div>
   </div>
 </nav>
 
@@ -300,7 +308,7 @@
     <a href="#validacion">Validación</a>
     <a href="#problemas">Problemas comunes</a>
     <a href="#limpieza">Limpieza</a>
-    <div class="side-progress"><small id="sideProgressLabel2">0/12 variables</small><div class="bar"><div class="fill" id="sideProgressFillAside"></div></div></div>
+    <div class="side-progress"><small id="sideProgressLabel2">0/15 variables</small><div class="bar"><div class="fill" id="sideProgressFillAside"></div></div></div>
   </nav>
   <main>
 
@@ -369,7 +377,7 @@
       <div class="mod-head"><h2 class="mod-title">Antes de empezar</h2></div>
       <ul class="check">
         <li>Proyecto GCP con facturación habilitada.</li>
-        <li><code>gcloud</code> autenticado y Docker ejecutándose.</li>
+        <li><code>gcloud</code> autenticado (<code>gcloud auth login</code>) — no necesitas Docker instalado, las imágenes se construyen con Cloud Build.</li>
         <li>Repositorio clonado y terminal ubicada en la raíz <code>demo_rag_agent</code>.</li>
         <li>Credenciales para PostgreSQL, OpenAI, Groq, Qdrant y SuperheroAPI.</li>
         <li>Usa Google Cloud Shell o Bash para poder ejecutar <code>envsubst</code>.</li>
@@ -382,7 +390,7 @@
       <p class="mod-kicker">Completa estos campos <b>una sola vez</b> — quedan guardados en este navegador (no se envían a ningún lado) y desde acá se arman solos todos los comandos de la guía. Los campos con valor por defecto ya sirven tal cual; lo único obligatorio para empezar es <code>PROJECT_ID</code>.</p>
 
       <div class="vtop">
-        <div class="vprogress"><div class="bar"><div class="fill" id="vProgressFill"></div></div><span id="vProgressLabel">0/12</span></div>
+        <div class="vprogress"><div class="bar"><div class="fill" id="vProgressFill"></div></div><span id="vProgressLabel">0/15</span></div>
         <button class="resetbtn" id="resetVars" type="button">Borrar mis variables</button>
       </div>
       <div class="vform" id="varForm">
@@ -457,10 +465,18 @@ gcloud services enable \
   modelarmor.googleapis.com \
   iam.googleapis.com \
   identitytoolkit.googleapis.com \
-  secretmanager.googleapis.com
+  secretmanager.googleapis.com \
+  cloudbuild.googleapis.com
 
 gcloud services list --enabled --project="$PROJECT_ID"</pre></div>
-      <div class="verify"><span class="lbl">Cómo confirmar</span><p>La lista final debe incluir las 9 APIs de arriba. Si acabas de habilitarlas y falta alguna, dale 1–2 minutos a que se propague y vuelve a correr el <code>list</code>.</p></div>
+      <div class="verify"><span class="lbl">Cómo confirmar</span><p>La lista final debe incluir las 10 APIs de arriba. Si acabas de habilitarlas y falta alguna, dale 1–2 minutos a que se propague y vuelve a correr el <code>list</code>.</p></div>
+      <p>Las tres imágenes de esta guía se construyen con <b>Cloud Build</b> (<code>gcloud builds submit</code>, Fases 2.2, 3.2 y 5) en vez de <code>docker build</code> + <code>docker push</code> local — por eso <code>cloudbuild.googleapis.com</code> está en la lista, y por eso <b>no necesitas Docker instalado</b> para este laboratorio. En proyectos nuevos, la Service Account por defecto de Cloud Build ya no recibe el rol Editor automáticamente, así que necesita permiso explícito para subir imágenes a Artifact Registry:</p>
+      <div class="codebox"><span class="codelabel">bash</span><button class="copy">Copiar</button><pre>export PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+  --role="roles/artifactregistry.writer"</pre></div>
+      <div class="clarify"><span class="lbl">Ojo</span><p>Si tu proyecto es de los que sí heredó el rol Editor en la SA de Cloud Build, este comando no rompe nada — solo agrega un rol que ya tenías cubierto.</p></div>
 
       <h3>1.2 Inicializar Identity Platform</h3>
       <div class="codebox"><span class="codelabel">bash</span><button class="copy">Copiar</button><pre>curl -X POST \
@@ -479,17 +495,15 @@ gcloud services list --enabled --project="$PROJECT_ID"</pre></div>
       <div class="clarify"><span class="lbl">Nota sobre nombres</span><p>Identity Platform usa el SDK web <code>firebase/auth</code>. Por eso el código conserva variables <code>NEXT_PUBLIC_FIREBASE_*</code>, aunque el producto de autenticación sea Identity Platform.</p></div>
 
       <h3>1.3 Crear el repositorio Docker</h3>
-      <p>Artifact Registry no crea el repositorio solo la primera vez que haces <code>docker push</code> — hay que crearlo antes.</p>
+      <p>Artifact Registry no crea el repositorio solo la primera vez que se sube una imagen — hay que crearlo antes.</p>
       <div class="codebox"><span class="codelabel">bash</span><button class="copy">Copiar</button><pre>gcloud artifacts repositories create "$AR_REPOSITORY" \
   --project="$PROJECT_ID" \
   --repository-format=docker \
   --location="$REGION" \
-  --description="Imágenes de demo_rag_agent"
-
-gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet</pre></div>
+  --description="Imágenes de demo_rag_agent"</pre></div>
       <div class="codebox"><span class="codelabel">bash · verificar</span><button class="copy">Copiar</button><pre>gcloud artifacts repositories describe "$AR_REPOSITORY" \
   --project="$PROJECT_ID" --location="$REGION"</pre></div>
-      <div class="verify"><span class="lbl">Cómo confirmar</span><p>Debe imprimir <code>format: DOCKER</code>. Si ya existía de una corrida anterior, el <code>create</code> de arriba falla con <code>ALREADY_EXISTS</code> — no pasa nada, seguí con el mismo nombre.</p></div>
+      <div class="verify"><span class="lbl">Cómo confirmar</span><p>Debe imprimir <code>format: DOCKER</code>. Si ya existía de una corrida anterior, el <code>create</code> de arriba falla con <code>ALREADY_EXISTS</code> — no pasa nada, seguí con el mismo nombre. No hace falta <code>gcloud auth configure-docker</code>: eso solo es necesario para hacer <code>docker push</code> desde tu Docker local, y esta guía construye y sube las imágenes con Cloud Build.</p></div>
 
       <h3>1.4 Service Account y permisos</h3>
       <p>Una única identidad para tres roles: el runtime de <code>02_agent_api</code> (llama a Model Armor y a <code>03_mcp_server</code>), y la identidad que usa el <b>Gateway</b> para invocar <code>02_agent_api</code>. Acá se le da todo lo que no depende de que un Cloud Run ya exista.</p>
@@ -558,11 +572,14 @@ nano 03_mcp_server/.env</pre></div>
       <p>Completa Qdrant, SuperheroAPI y OpenAI (para embeddings de <code>retrieve_documents</code>). No necesita ninguna variable nueva para el transporte HTTP — Cloud Run inyecta <code>PORT</code> automáticamente. Guarda con <b>Ctrl+O</b>, Enter y sal con <b>Ctrl+X</b>.</p>
 
       <h3>2.2 Construir, subir y desplegar</h3>
+      <p>El build corre en <b>Cloud Build</b>, no en tu máquina — no hace falta Docker instalado.</p>
       <div class="codebox"><span class="codelabel">bash</span><button class="copy">Copiar</button><pre>export IMAGE_TAG="$(date +'%Y%m%d-%H%M%S')"
 export MCP_SERVER_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/03-mcp-server:${IMAGE_TAG}"
 
-docker build -t "$MCP_SERVER_IMAGE" 03_mcp_server
-docker push "$MCP_SERVER_IMAGE"
+gcloud builds submit 03_mcp_server \
+  --project="$PROJECT_ID" \
+  --tag="$MCP_SERVER_IMAGE"
+
 export MCP_ENV_VARS="$(grep -vE '^\s*(#|$)' 03_mcp_server/.env | paste -sd, -)"
 
 gcloud run deploy "$MCP_SERVER_SERVICE" \
@@ -581,6 +598,7 @@ gcloud run services add-iam-policy-binding "$MCP_SERVER_SERVICE" \
   --project="$PROJECT_ID" --region="$REGION" \
   --member="serviceAccount:${SERVICE_SA}" --role="roles/run.invoker"</pre></div>
       <div class="verify"><span class="lbl">Cómo confirmar</span><p>El <code>echo</code> debe imprimir algo como <code>MCP: https://mcp-server-service-xxxxx-uc.a.run.app/mcp</code>. Si sale <code>MCP: /mcp</code> (vacío antes de la barra), el deploy del paso 2.2 falló — revisa <code>gcloud run revisions list --service="$MCP_SERVER_SERVICE"</code> antes de seguir. La URL usada por el cliente termina en <code>/mcp</code>, <b>sin</b> barra final — ver la nota de abajo, es al revés de lo que uno esperaría.</p></div>
+      <div class="inlinevar"><label for="v-mcpServerUrl">MCP_SERVER_URL</label><input id="v-mcpServerUrl" data-key="mcpServerUrl" placeholder="https://mcp-server-service-xxxxx-uc.a.run.app" autocomplete="off"><small>Pega acá lo que imprimió <code>echo "$MCP_SERVER_URL"</code> arriba (sin <code>/mcp</code> al final) — se completa solo en la Fase 3.1.</small></div>
       <div class="clarify"><span class="lbl">Ojo</span><p><code>03_mcp_server/requirements.txt</code> fija <code>mcp[cli]&gt;=1.13.0,&lt;2</code> a propósito — no bajes a <code>==1.8.0</code> (no propaga <code>structuredContent</code>, las fuentes de <code>retrieve_documents</code>/<code>get_pokemon</code> quedarían vacías) ni subas a <code>&gt;=2</code> (breaking change, <code>FastMCP</code> se renombró y el server ni arranca). <b>Por qué la URL va sin barra final:</b> el endpoint registrado es <code>/mcp</code> sin slash. Pedir <code>/mcp/</code> devuelve un <code>307</code> cuyo <code>Location</code> usa <code>http://</code> en vez de <code>https://</code> — ese downgrade de esquema hace que <code>httpx</code> descarte el header <code>Authorization</code> al seguir la redirección (comportamiento de seguridad estándar), y la segunda petición sin token la rechaza Cloud Run con <code>403</code> — un error que parece de IAM pero es de la barra final.</p></div>
     </section>
 
@@ -595,16 +613,17 @@ nano 02_agent_api/.env</pre></div>
 MODEL_ARMOR_PROJECT_ID=${PROJECT_ID}
 MODEL_ARMOR_LOCATION=${REGION}
 MODEL_ARMOR_TEMPLATE_ID=${MODEL_ARMOR_TEMPLATE_ID}
-DEMO_MCP_SERVER_URL=&lt;pega aquí $MCP_SERVER_URL de la Fase 2.3&gt;/mcp</pre></div>
+DEMO_MCP_SERVER_URL=${MCP_SERVER_URL}/mcp</pre></div>
       <p>También completa OpenAI, PostgreSQL y Groq. La credencial JSON queda vacía: Cloud Run utiliza la SA adjunta. <b>Sin barra final</b> en <code>/mcp</code> — con barra da un redirect 307 que descarta <code>Authorization</code> (ver Fase 2.3).</p>
 
       <h3>3.2 Build y deploy privado</h3>
-      <div class="clarify"><span class="lbl">Recursos verificados</span><p>El contenedor carga spaCy, guardrails, LangChain y MCP durante el arranque. Con <code>1Gi</code> el arranque es inestable — usa <code>--cpu=4 --memory=4Gi</code>, que es lo que quedó probado y estable. Si no llega a escuchar <code>PORT=8080</code> revisa los logs primero; no ocultes un cold start fallido aumentando solamente el timeout del Gateway.</p></div>
+      <div class="clarify"><span class="lbl">Recursos verificados</span><p>El contenedor carga spaCy, guardrails, LangChain y MCP durante el arranque. Con <code>1Gi</code> el arranque es inestable — usa <code>--cpu=4 --memory=4Gi</code>, que es lo que quedó probado y estable. Si no llega a escuchar <code>PORT=8080</code> revisa los logs primero (<code>gcloud run services logs read</code>, ver Validación) — no ocultes un cold start fallido aumentando solamente el timeout del Gateway.</p></div>
       <div class="codebox"><span class="codelabel">bash</span><button class="copy">Copiar</button><pre>export IMAGE_TAG="$(date +'%Y%m%d-%H%M%S')"
 export AGENT_API_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/02-agent-api:${IMAGE_TAG}"
 
-docker build -t "$AGENT_API_IMAGE" 02_agent_api
-docker push "$AGENT_API_IMAGE"
+gcloud builds submit 02_agent_api \
+  --project="$PROJECT_ID" \
+  --tag="$AGENT_API_IMAGE"
 
 # Crea los secretos una vez, agrega la versión real desde .env y concede a la
 # SA acceso solo a cada secreto (no a todos los secretos del proyecto).
@@ -659,6 +678,7 @@ export CLOUD_RUN_URL="$(gcloud run services describe "$AGENT_API_SERVICE" \
   --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
 echo "Agent API: $CLOUD_RUN_URL"</pre></div>
       <div class="verify"><span class="lbl">Cómo confirmar</span><p>Debe imprimir una URL <code>https://agent-api-service-xxxxx-uc.a.run.app</code>. Guárdala — la vas a necesitar en la Fase 4.1 y en la <a href="#validacion">Validación</a>.</p></div>
+      <div class="inlinevar"><label for="v-cloudRunUrl">CLOUD_RUN_URL</label><input id="v-cloudRunUrl" data-key="cloudRunUrl" placeholder="https://agent-api-service-xxxxx-uc.a.run.app" autocomplete="off"><small>Pega acá lo que imprimió <code>echo "Agent API: $CLOUD_RUN_URL"</code> arriba — se completa solo en Validación.</small></div>
     </section>
 
     <section class="mod" id="fase4">
@@ -668,11 +688,27 @@ echo "Agent API: $CLOUD_RUN_URL"</pre></div>
 
       <h3>4.1 Renderizar el OpenAPI</h3>
       <p>Google API Gateway sube el YAML tal cual — no soporta variables en runtime, así que hay que resolverlas antes con <code>envsubst</code>. <code>GATEWAY_HOST</code> recién se conoce después de crear el gateway (4.3); para esta primera subida usamos un placeholder, ya que <code>servers.url</code> es solo informativo.</p>
+      <div class="clarify"><span class="lbl">Ojo con envsubst sin lista</span><p><code>envsubst</code> sin argumentos sustituye <b>cualquier</b> patrón <code>$VAR</code> o <code>$&#123;VAR&#125;</code> del archivo — incluido <code>$ref</code>, que OpenAPI usa por todo el spec (<code>openapi_gateway.yml</code> solo tiene 3 variables reales: <code>CLOUD_RUN_URL</code>, <code>GATEWAY_HOST</code> e <code>IDENTITY_PLATFORM_PROJECT_ID</code>). Como no existe una variable de entorno <code>ref</code>, <code>envsubst</code> reemplaza cada <code>$ref</code> por texto vacío y rompe <b>todos</b> los <code>$ref</code> del schema — un YAML que sigue pareciendo válido pero con las referencias vacías. Por eso el comando de abajo le pasa la lista explícita de variables a sustituir, y valida el resultado antes de seguir.</p></div>
       <div class="codebox"><span class="codelabel">bash</span><button class="copy">Copiar</button><pre>export GATEWAY_HOST="placeholder.gateway.dev"
 
 cd 02_agent_api
-envsubst < openapi_gateway.yml > openapi_gateway.rendered.yml
+
+envsubst '${CLOUD_RUN_URL} ${GATEWAY_HOST} ${IDENTITY_PLATFORM_PROJECT_ID}' \
+  < openapi_gateway.yml > openapi_gateway.rendered.yml
+
+# Verificación: falla temprano si quedó algo sin resolver o roto
+if grep -qE '\$\{' openapi_gateway.rendered.yml; then
+  echo "ERROR: quedaron variables \${...} sin sustituir en openapi_gateway.rendered.yml" >&2
+  grep -n '\${' openapi_gateway.rendered.yml >&2
+  exit 1
+fi
+if grep -qE '^\s*: "' openapi_gateway.rendered.yml; then
+  echo "ERROR: quedó un \$ref roto en openapi_gateway.rendered.yml (revisa la lista de envsubst)" >&2
+  exit 1
+fi
+
 cd ..</pre></div>
+      <div class="verify"><span class="lbl">Cómo confirmar</span><p>Si el bloque no imprime ningún <code>ERROR</code> y sigue de largo, el render salió limpio. Si agregas una variable nueva a <code>openapi_gateway.yml</code> más adelante, agrégala también a esta lista de <code>envsubst</code> — si no, <code>envsubst</code> la deja tal cual (literal en el YAML) y el primer <code>if</code> de arriba lo va a detectar.</p></div>
 
       <h3>4.2 Crear API, config y gateway</h3>
       <div class="codebox"><span class="codelabel">bash</span><button class="copy">Copiar</button><pre>gcloud api-gateway apis create "$GATEWAY_API_ID" --project="$PROJECT_ID"
@@ -694,6 +730,7 @@ export GATEWAY_HOST="$(gcloud api-gateway gateways describe "$GATEWAY_ID" \
   --format='value(defaultHostname)')"
 echo "Gateway listo en: https://$GATEWAY_HOST"</pre></div>
       <div class="verify"><span class="lbl">Cómo confirmar</span><p>Debe imprimir algo como <code>https://agent-api-gateway-xxxxxxxx.uc.gateway.dev</code>. Este paso puede tardar varios minutos (creación de API + config + gateway) — es normal que la terminal quede "pegada" un rato.</p></div>
+      <div class="inlinevar"><label for="v-gatewayHost">GATEWAY_HOST</label><input id="v-gatewayHost" data-key="gatewayHost" placeholder="agent-api-gateway-xxxxxxxx.uc.gateway.dev" autocomplete="off"><small>Pega acá el host que imprimió arriba (sin <code>https://</code>) — se completa solo en la Fase 5 y en Validación.</small></div>
       <p>Si quieres que <code>servers.url</code> del YAML refleje el host real (no el placeholder), vuelve a correr el <code>envsubst</code> del paso 4.1 con el <code>$GATEWAY_HOST</code> real — no es obligatorio, es solo documentación dentro del propio spec.</p>
       <div class="clarify"><span class="lbl">Actualizar el config más adelante</span><p>Nuevo deploy de <code>02_agent_api</code>, o cambios en <code>openapi_gateway.yml</code>: crea un nuevo <code>GATEWAY_CONFIG_ID</code> (ej. <code>agent-api-gw-config-v2</code>, edítalo en el formulario de la Fase 0) con <code>api-configs create</code> y luego apunta el gateway existente: <code>gcloud api-gateway gateways update "$GATEWAY_ID" --api="$GATEWAY_API_ID" --api-config=NUEVO_CONFIG_ID --location="$REGION"</code> — los configs son inmutables, no se editan in-place.</p></div>
       <div class="route"><span class="pill">POST /api/chat</span><span class="pill">GET /api/history/{id}</span><span class="pill">GET /api/sessions/{user}</span><span class="pill">GET /api/errors</span><span class="pill">POST /api/feedback</span><span class="pill">POST /api/evaluate</span></div>
@@ -702,31 +739,25 @@ echo "Gateway listo en: https://$GATEWAY_HOST"</pre></div>
     <section class="mod" id="fase5">
       <div class="mod-head"><span class="mod-num">05</span><h2 class="mod-title">Desplegar el frontend</h2></div>
       <p class="mod-kicker">Recién acá se despliega lo que ve el usuario final — necesitaba el host del Gateway (recién obtenido en la Fase 4), porque las variables <code>NEXT_PUBLIC_*</code> se hornean dentro del bundle de JS en build-time, no se pueden cambiar después con variables de entorno de Cloud Run.</p>
-      <div class="codebox"><span class="codelabel">bash</span><button class="copy">Copiar</button><pre>cd 01_agent-app
-
-export IMAGE_TAG=$(date +"%Y%m%d-%H%M%S")
+      <p>Este build necesita 4 <code>--build-arg</code>, y <code>gcloud builds submit --tag</code> (el atajo de las Fases 2.2 y 3.2) no los soporta. Por eso <code>01_agent-app/cloudbuild.yaml</code> describe el mismo <code>docker build</code> explícitamente, y los 4 valores se inyectan vía <code>--substitutions</code> al invocarlo.</p>
+      <div class="codebox"><span class="codelabel">bash</span><button class="copy">Copiar</button><pre>export IMAGE_TAG=$(date +"%Y%m%d-%H%M%S")
 export AGENT_APP_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/01-agent-app:${IMAGE_TAG}"
 
-docker build \
-  --build-arg NEXT_PUBLIC_API_BASE="https://${GATEWAY_HOST}" \
-  --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="${IDENTITY_PLATFORM_API_KEY}" \
-  --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="${IDENTITY_PLATFORM_AUTH_DOMAIN}" \
-  --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="${IDENTITY_PLATFORM_PROJECT_ID}" \
-  -t "$AGENT_APP_IMAGE" .
-
-docker push "$AGENT_APP_IMAGE"
+gcloud builds submit 01_agent-app \
+  --project="$PROJECT_ID" \
+  --config=01_agent-app/cloudbuild.yaml \
+  --substitutions=_GATEWAY_HOST="$GATEWAY_HOST",_FIREBASE_API_KEY="$IDENTITY_PLATFORM_API_KEY",_FIREBASE_AUTH_DOMAIN="$IDENTITY_PLATFORM_AUTH_DOMAIN",_FIREBASE_PROJECT_ID="$IDENTITY_PLATFORM_PROJECT_ID",_IMAGE="$AGENT_APP_IMAGE"
 
 gcloud run deploy "$AGENT_APP_SERVICE" \
   --image "$AGENT_APP_IMAGE" \
   --region "$REGION" \
   --platform managed \
   --allow-unauthenticated \
-  --port 3000
-
-cd ..</pre></div>
+  --port 3000</pre></div>
+      <div class="clarify"><span class="lbl">Ojo</span><p>Las sustituciones van separadas por comas y sin espacios alrededor del <code>=</code> — si algún valor llegara a contener una coma (no debería, para una API key o un host), rómpelo en un <code>cloudbuild.yaml</code> con variables de entorno en vez de <code>--substitutions</code>.</p></div>
       <div class="codebox"><span class="codelabel">bash · verificar</span><button class="copy">Copiar</button><pre>gcloud run services describe "$AGENT_APP_SERVICE" \
   --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)'</pre></div>
-      <div class="verify"><span class="lbl">Cómo confirmar</span><p>Abre la URL que imprime — deberías ver la pantalla de login (redirige sola a <code>/login</code>). Si ves texto <code>localhost:8080</code> en las llamadas de red del navegador, las variables públicas faltaron durante el <code>docker build</code>: reconstruye la imagen (necesitas <code>$GATEWAY_HOST</code> ya definido, por eso este paso va al final).</p></div>
+      <div class="verify"><span class="lbl">Cómo confirmar</span><p>Abre la URL que imprime — deberías ver la pantalla de login (redirige sola a <code>/login</code>). Si ves texto <code>localhost:8080</code> en las llamadas de red del navegador, las variables públicas faltaron durante el build: reconstruye la imagen (necesitas <code>$GATEWAY_HOST</code> ya definido, por eso este paso va al final).</p></div>
       <p><code>01_agent-app</code> sí queda público (<code>--allow-unauthenticated</code>) — es la app que ve el usuario final; la protección real está en que <code>02_agent_api</code> solo acepta al Gateway (y <code>03_mcp_server</code> solo acepta a <code>02_agent_api</code>), y el Gateway solo reenvía peticiones con un JWT válido de Identity Platform.</p>
     </section>
 
@@ -761,13 +792,14 @@ curl -i -X POST "https://${GATEWAY_HOST}/api/chat" \
     <section class="mod" id="problemas">
       <div class="mod-head"><h2 class="mod-title">Problemas comunes</h2></div>
       <div class="grid-2">
-        <div class="card"><b>docker push: repository not found</b><p>Revisa que Artifact Registry exista en la misma región y con el mismo nombre de <code>AR_REPOSITORY</code> (Fase 1.3).</p></div>
+        <div class="card"><b>gcloud builds submit: repository not found</b><p>Revisa que Artifact Registry exista en la misma región y con el mismo nombre de <code>AR_REPOSITORY</code> (Fase 1.3).</p></div>
+        <div class="card"><b>Cloud Build: PERMISSION_DENIED al subir la imagen</b><p>Falta el binding <code>roles/artifactregistry.writer</code> a la SA de Cloud Build (Fase 1.1) — proyectos nuevos ya no lo traen por defecto.</p></div>
         <div class="card"><b>Permission iam.serviceAccounts.actAs</b><p>El usuario que despliega necesita <code>roles/iam.serviceAccountUser</code> sobre la SA (Fase 1.4).</p></div>
         <div class="card"><b>Gateway devuelve 401</b><p>Confirma Identity Platform, issuer, audience, API key y que el frontend realmente envíe el ID token.</p></div>
         <div class="card"><b>MCP devuelve 401/403</b><p>Lo más común: <code>DEMO_MCP_SERVER_URL</code> con barra final (rompe el header <code>Authorization</code> en el redirect, Fase 2.3). Si no es eso, confirma <code>roles/run.invoker</code> y la SA adjunta al Agent API.</p></div>
         <div class="card"><b>Model Armor usa fallback</b><p>Comprueba project, región, template ID, endpoint regional y <code>roles/modelarmor.user</code> (Fase 1.5).</p></div>
         <div class="card"><b>Gateway 504 + Cloud Run 503</b><p>Busca <code>failed the readiness check</code>. Es un cold start fallido: revisa logs, memoria (<code>--cpu=4 --memory=4Gi</code>) e integraciones opcionales; no es IAM del Gateway.</p></div>
-        <div class="card"><b>El frontend llama a localhost</b><p>Las variables públicas faltaron durante <code>docker build</code>. Reconstruye la imagen después de conocer el Gateway (Fase 5).</p></div>
+        <div class="card"><b>El frontend llama a localhost</b><p>Las variables públicas faltaron durante el build (revisa el <code>--substitutions</code> de la Fase 5). Reconstruye la imagen después de conocer el Gateway.</p></div>
         <div class="card"><b>Neon/LangSmith no conectan, sin error visible</b><p>Revisa que los 5 secretos estén los 5 en <code>--set-secrets</code> del deploy de <code>02_agent_api</code> (Fase 3.2) — falta uno y esa integración queda desconectada en silencio.</p></div>
       </div>
       <div class="danger clarify" style="margin-top:18px"><span class="lbl">No compartas secretos</span><p>El HTML se puede enviar por WhatsApp; los archivos <code>.env</code>, tokens y API keys privadas no.</p></div>
@@ -806,6 +838,10 @@ gcloud model-armor templates delete "$MODEL_ARMOR_TEMPLATE_ID" \
   --project="$PROJECT_ID" --location="$REGION" --quiet
 
 # 5. Bindings IAM a nivel de proyecto — no se borran solos con la SA.
+export PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+gcloud projects remove-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+  --role="roles/artifactregistry.writer" --quiet
 gcloud projects remove-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:${SERVICE_SA}" \
   --role="roles/modelarmor.user" --quiet
@@ -894,7 +930,7 @@ rm -f 02_agent_api/openapi_gateway.rendered.yml</pre></div>
   document.querySelectorAll('.copy').forEach(btn=>btn.addEventListener('click',async()=>{const text=btn.parentElement.querySelector('pre').textContent;const old=btn.textContent;try{await copyText(text);btn.textContent='✓ Copiado'}catch{btn.textContent='Selecciona y copia'}setTimeout(()=>btn.textContent=old,1400)}));
 
   // ---------- estado de variables (persistido en este navegador) ----------
-  const DEFAULTS={projectId:'',region:'us-central1',arRepository:'repo',serviceSaName:'agent-b-runtime',modelArmorTemplateId:'agent-api-template',mcpServerService:'mcp-server-service',agentApiService:'agent-api-service',agentAppService:'agent-app-service',gatewayApiId:'agent-api-gw',gatewayConfigId:'agent-api-gw-config-v1',gatewayId:'agent-api-gateway',identityPlatformApiKey:''};
+  const DEFAULTS={projectId:'',region:'us-central1',arRepository:'repo',serviceSaName:'agent-b-runtime',modelArmorTemplateId:'agent-api-template',mcpServerService:'mcp-server-service',agentApiService:'agent-api-service',agentAppService:'agent-app-service',gatewayApiId:'agent-api-gw',gatewayConfigId:'agent-api-gw-config-v1',gatewayId:'agent-api-gateway',identityPlatformApiKey:'',mcpServerUrl:'',cloudRunUrl:'',gatewayHost:''};
   const STORE_KEY='rag_lab_vars_v1';
   let state=Object.assign({},DEFAULTS);
   try{const saved=JSON.parse(localStorage.getItem(STORE_KEY)||'{}');state=Object.assign({},DEFAULTS,saved)}catch(e){}
@@ -927,6 +963,9 @@ rm -f 02_agent_api/openapi_gateway.rendered.yml</pre></div>
     ['IDENTITY_PLATFORM_PROJECT_ID',()=>sv('projectId')],
     ['IDENTITY_PLATFORM_API_KEY',()=>sv('identityPlatformApiKey')],
     ['IDENTITY_PLATFORM_AUTH_DOMAIN',()=>sv('projectId')?`${sv('projectId')}.firebaseapp.com`:''],
+    ['MCP_SERVER_URL',()=>sv('mcpServerUrl')],
+    ['CLOUD_RUN_URL',()=>sv('cloudRunUrl')],
+    ['GATEWAY_HOST',()=>sv('gatewayHost')],
   ];
   const VAR_RE=new RegExp('\\$\\{?('+VARS.map(v=>v[0]).join('|')+')\\}?(?![A-Za-z0-9_])','g');
   function escapeHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
@@ -948,8 +987,10 @@ rm -f 02_agent_api/openapi_gateway.rendered.yml</pre></div>
   }
 
   // ---------- formulario ----------
-  const form=document.getElementById('varForm');
-  const inputs=Array.from(form.querySelectorAll('input[data-key]'));
+  // Todos los inputs con data-key en toda la página: los 12 del formulario de
+  // la Fase 0 más los 3 "inline" (MCP_SERVER_URL, CLOUD_RUN_URL, GATEWAY_HOST)
+  // que aparecen junto al comando que los genera, más adelante en la guía.
+  const inputs=Array.from(document.querySelectorAll('input[data-key]'));
   function loadFormFromState(){
     for(const inp of inputs){inp.value=state[inp.dataset.key]||''}
   }

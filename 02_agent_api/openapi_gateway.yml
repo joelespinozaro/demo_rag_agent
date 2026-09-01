@@ -72,12 +72,12 @@ paths:
                 summary: Nueva sesión (sin session_id)
                 value:
                   question: "¿Cuál es la fecha de hoy?"
-                  user: "igorov"
+                  user: "usuario_01"
               sesion_existente:
                 summary: Sesión existente
                 value:
                   question: "¿Y qué hora es?"
-                  user: "igorov"
+                  user: "usuario_01"
                   session_id: "550e8400-e29b-41d4-a716-446655440000"
       responses:
         "200":
@@ -150,7 +150,7 @@ paths:
         schema:
           type: string
         description: Identificador del usuario
-        example: "igorov"
+        example: "usuario_01"
     options:
       operationId: getSessionsByUserOptions
       summary: CORS preflight
@@ -351,7 +351,7 @@ components:
           example: "¿Cuál es la fecha de hoy?"
         user:
           type: string
-          example: igorov
+          example: usuario_01
         session_id:
           type: string
           nullable: true

@@ -40,7 +40,8 @@ Guía paso a paso para desplegar los 3 componentes de este proyecto que sirven a
 Antes de ejecutar la guía necesitas:
 
 - Un proyecto GCP con **facturación habilitada** y permisos para habilitar APIs, crear repositorios de Artifact Registry, Service Accounts, bindings IAM, servicios Cloud Run, recursos de API Gateway y templates de Model Armor.
-- `gcloud` autenticado (`gcloud auth login`) y Docker en ejecución. La ruta recomendada es **Bash o Google Cloud Shell**, porque el render del OpenAPI usa `envsubst`. En Windows, los despliegues de los servicios también incluyen scripts `.ps1` y `.bat`, pero la creación de recursos de esta guía está expresada en Bash/Cloud Shell.
+- `gcloud` autenticado (`gcloud auth login`). La ruta recomendada es **Bash o Google Cloud Shell**, porque el render del OpenAPI usa `envsubst`. En Windows, los despliegues de los servicios también incluyen scripts `.ps1` y `.bat`, pero la creación de recursos de esta guía está expresada en Bash/Cloud Shell.
+- **No hace falta Docker instalado ni corriendo**: las tres imágenes se construyen con `gcloud builds submit` (Cloud Build, en la nube) — más robusto que build+push local, porque no depende de que Docker Desktop esté corriendo y evita el clásico problema de construir una imagen `arm64`/`Windows` que después falla en Cloud Run (que exige `linux/amd64`). Cloud Build queda habilitado en la Fase 1.1.
 - Identity Platform habilitado en el proyecto y al menos un proveedor de identidad configurado. La Fase 1 incluye la inicialización de Identity Platform; por claridad didáctica, la activación del proveedor y la creación del usuario de laboratorio se hacen desde Google Cloud Console.
 - Los servicios externos y secretos indicados en `02_agent_api/.env.example` y `03_mcp_server/.env.example`: PostgreSQL, OpenAI y Groq para Agent API; OpenAI, Qdrant y SuperheroAPI para las herramientas MCP que los utilizan. Neon y LangSmith son opcionales. No reemplaces los ejemplos `sk-...`, `gsk_...` o `your-...` por valores ficticios en producción.
 
@@ -139,11 +140,24 @@ gcloud services enable \
   modelarmor.googleapis.com \
   iam.googleapis.com \
   identitytoolkit.googleapis.com \
-  secretmanager.googleapis.com
+  secretmanager.googleapis.com \
+  cloudbuild.googleapis.com
 
 # Esperar a que la habilitación termine antes de crear los recursos siguientes.
 gcloud services list --enabled --project="$PROJECT_ID"
 ```
+
+Las tres imágenes de esta guía (`03_mcp_server`, `02_agent_api`, `01_agent-app`) se construyen con **Cloud Build** (`gcloud builds submit`, ver Fases 2.2, 3.2 y 5) en vez de `docker build` + `docker push` local — por eso `cloudbuild.googleapis.com` está en la lista. En proyectos nuevos, la Service Account por defecto de Cloud Build ya no recibe el rol `Editor` automáticamente, así que necesita permiso explícito para subir imágenes a Artifact Registry:
+
+```bash
+export PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+  --role="roles/artifactregistry.writer"
+```
+
+> Si tu proyecto es de los que sí heredó el rol `Editor` en la SA de Cloud Build, este comando no rompe nada — solo agrega un rol que ya tenías cubierto.
 
 ### 1.2. Inicializar Identity Platform
 
@@ -168,9 +182,9 @@ Ahora realiza estos tres pasos en **Google Cloud Console → Identity Platform**
 
 > Aunque el paquete del frontend y sus variables se llaman `firebase`/`NEXT_PUBLIC_FIREBASE_*`, no se está usando Firebase Authentication como producto separado. Identity Platform utiliza ese SDK cliente y emite tokens con issuer `https://securetoken.google.com/$PROJECT_ID`, que API Gateway valida.
 
-### 1.3. Crear el repositorio Docker y autenticar Docker
+### 1.3. Crear el repositorio Docker
 
-Artifact Registry no crea el repositorio automáticamente durante `docker push`. En un proyecto nuevo hay que crearlo primero:
+Artifact Registry no crea el repositorio automáticamente durante el primer build. En un proyecto nuevo hay que crearlo primero:
 
 ```bash
 gcloud artifacts repositories create "$AR_REPOSITORY" \
@@ -178,11 +192,9 @@ gcloud artifacts repositories create "$AR_REPOSITORY" \
   --repository-format=docker \
   --location="$REGION" \
   --description="Imágenes de demo_rag_agent"
-
-gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 ```
 
-Si el repositorio ya existe, omite el comando `repositories create` y conserva el mismo nombre y región en todos los scripts.
+Si el repositorio ya existe, omite el comando `repositories create` y conserva el mismo nombre y región en todos los scripts. No hace falta `gcloud auth configure-docker` — eso solo es necesario para hacer `docker push` desde tu Docker local, y esta guía construye y sube las imágenes con Cloud Build (Fases 2.2, 3.2 y 5), no con tu Docker.
 
 ### 1.4. Crear la Service Account única y darle los permisos que ya se pueden otorgar
 
@@ -273,8 +285,9 @@ Completa Qdrant, SuperheroAPI y OpenAI para embeddings de `retrieve_documents`. 
 export IMAGE_TAG="$(date +'%Y%m%d-%H%M%S')"
 export MCP_SERVER_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/03-mcp-server:${IMAGE_TAG}"
 
-docker build -t "$MCP_SERVER_IMAGE" 03_mcp_server
-docker push "$MCP_SERVER_IMAGE"
+gcloud builds submit 03_mcp_server \
+  --project="$PROJECT_ID" \
+  --tag="$MCP_SERVER_IMAGE"
 
 export MCP_ENV_VARS="$(grep -vE '^\s*(#|$)' 03_mcp_server/.env | paste -sd, -)"
 
@@ -336,14 +349,15 @@ Por ejemplo, si el comando anterior mostró `https://mcp-server-service-abc-uc.a
 
 ### 3.2. Build + deploy
 
-> **Validación real del laboratorio:** este contenedor carga spaCy, guardrails, LangChain y clientes MCP durante el arranque — con `--memory=1Gi` el arranque es inestable (varias revisiones fallaron por esto durante la validación de esta guía). Usa `--cpu=4 --memory=4Gi`, que es lo que quedó probado y estable de punta a punta. Si Cloud Run informa que no escuchó `PORT=8080`, no aumentes el timeout del Gateway a ciegas: revisa primero los logs de la revisión y prueba la misma imagen con `docker run`. Las integraciones opcionales Neon MCP y LangSmith pueden omitirse del runtime sin quitar `DATABASE_URL` ni el MCP privado principal, pero si las incluyes revisa que **las 5** queden en `--set-secrets` — omitir una silenciosamente la deja sin conectar, sin ningún error visible.
+> **Validación real del laboratorio:** este contenedor carga spaCy, guardrails, LangChain y clientes MCP durante el arranque — con `--memory=1Gi` el arranque es inestable (varias revisiones fallaron por esto durante la validación de esta guía). Usa `--cpu=4 --memory=4Gi`, que es lo que quedó probado y estable de punta a punta. Si Cloud Run informa que no escuchó `PORT=8080`, no aumentes el timeout del Gateway a ciegas: revisa primero los logs de la revisión (`gcloud run services logs read`, ver Verificación) — o, si tienes Docker instalado localmente, prueba la misma imagen con `docker run` (opcional, no lo necesitas para el resto de la guía). Las integraciones opcionales Neon MCP y LangSmith pueden omitirse del runtime sin quitar `DATABASE_URL` ni el MCP privado principal, pero si las incluyes revisa que **las 5** queden en `--set-secrets` — omitir una silenciosamente la deja sin conectar, sin ningún error visible.
 
 ```bash
 export IMAGE_TAG="$(date +'%Y%m%d-%H%M%S')"
 export AGENT_API_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/02-agent-api:${IMAGE_TAG}"
 
-docker build -t "$AGENT_API_IMAGE" 02_agent_api
-docker push "$AGENT_API_IMAGE"
+gcloud builds submit 02_agent_api \
+  --project="$PROJECT_ID" \
+  --tag="$AGENT_API_IMAGE"
 
 # Crea los secretos una vez, agrega la versión real desde .env y concede a la
 # SA acceso solo a cada secreto (no a todos los secretos del proyecto).
@@ -417,11 +431,27 @@ echo "$CLOUD_RUN_URL"
 
 La plantilla configura `deadline: 120.0` para el backend. Es necesario porque la primera petición puede inicializar el agente, la conexión MCP y los guardrails; con el límite predeterminado la prueba real puede terminar en `504 upstream request timeout`.
 
+> **No corras `envsubst` sin lista de variables.** Sin argumentos, `envsubst` sustituye *cualquier* `$VAR` o `${VAR}` del archivo — incluido `$ref`, que OpenAPI usa por todo el spec para las referencias de schema. Como no existe una variable de entorno `ref`, `envsubst` reemplaza cada `$ref` por texto vacío y rompe **todos** los `$ref` del archivo — un YAML que sigue pareciendo válido pero con las referencias vacías. Por eso el comando de abajo le pasa la lista explícita de las 3 variables reales y valida el resultado antes de seguir. Si en algún momento agregas una variable nueva a `openapi_gateway.yml`, agrégala también a esta lista — si no, `envsubst` la deja tal cual (literal en el YAML) y la verificación de abajo lo va a detectar.
+
 ```bash
 export GATEWAY_HOST="placeholder.gateway.dev"
 
 cd 02_agent_api
-envsubst < openapi_gateway.yml > openapi_gateway.rendered.yml
+
+envsubst '${CLOUD_RUN_URL} ${GATEWAY_HOST} ${IDENTITY_PLATFORM_PROJECT_ID}' \
+  < openapi_gateway.yml > openapi_gateway.rendered.yml
+
+# Verificación: falla temprano si quedó algo sin resolver o roto
+if grep -qE '\$\{' openapi_gateway.rendered.yml; then
+  echo "ERROR: quedaron variables \${...} sin sustituir en openapi_gateway.rendered.yml" >&2
+  grep -n '\${' openapi_gateway.rendered.yml >&2
+  exit 1
+fi
+if grep -qE '^\s*: "' openapi_gateway.rendered.yml; then
+  echo "ERROR: quedó un \$ref roto en openapi_gateway.rendered.yml (revisa la lista de envsubst)" >&2
+  exit 1
+fi
+
 cd ..
 ```
 
@@ -457,20 +487,16 @@ Si quieres que `servers.url` del YAML refleje el host real (no el placeholder), 
 
 Recién acá se despliega el frontend — ya tenemos `$GATEWAY_HOST`, la única variable que le faltaba. Las variables `NEXT_PUBLIC_*` se hornean en build-time (ver comentario en `01_agent-app/Dockerfile`).
 
-```bash
-cd 01_agent-app
+Este build necesita 4 `--build-arg`, y `gcloud builds submit --tag` (el atajo que usan las Fases 2.2 y 3.2) no soporta pasarlos. Por eso `01_agent-app/cloudbuild.yaml` describe el mismo `docker build` explícitamente, y los 4 valores se inyectan vía `--substitutions` al momento de invocarlo:
 
+```bash
 export IMAGE_TAG=$(date +"%Y%m%d-%H%M%S")
 export AGENT_APP_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPOSITORY}/01-agent-app:${IMAGE_TAG}"
 
-docker build \
-  --build-arg NEXT_PUBLIC_API_BASE="https://${GATEWAY_HOST}" \
-  --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="${IDENTITY_PLATFORM_API_KEY}" \
-  --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="${IDENTITY_PLATFORM_AUTH_DOMAIN}" \
-  --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="${IDENTITY_PLATFORM_PROJECT_ID}" \
-  -t "$AGENT_APP_IMAGE" .
-
-docker push "$AGENT_APP_IMAGE"
+gcloud builds submit 01_agent-app \
+  --project="$PROJECT_ID" \
+  --config=01_agent-app/cloudbuild.yaml \
+  --substitutions=_GATEWAY_HOST="$GATEWAY_HOST",_FIREBASE_API_KEY="$IDENTITY_PLATFORM_API_KEY",_FIREBASE_AUTH_DOMAIN="$IDENTITY_PLATFORM_AUTH_DOMAIN",_FIREBASE_PROJECT_ID="$IDENTITY_PLATFORM_PROJECT_ID",_IMAGE="$AGENT_APP_IMAGE"
 
 gcloud run deploy "$AGENT_APP_SERVICE" \
   --image "$AGENT_APP_IMAGE" \
@@ -478,9 +504,9 @@ gcloud run deploy "$AGENT_APP_SERVICE" \
   --platform managed \
   --allow-unauthenticated \
   --port 3000
-
-cd ..
 ```
+
+> Las sustituciones van separadas por comas y sin espacios alrededor del `=` — si algún valor llegara a contener una coma (no debería, para una API key o un host), rómpelo en un `cloudbuild.yaml` con variables de entorno en vez de `--substitutions`.
 
 `01_agent-app` sí queda público (`--allow-unauthenticated`) — es la app que ve el usuario final; la protección real está en que `02_agent_api` solo acepta al Gateway (y `03_mcp_server` solo acepta a `02_agent_api`), y el Gateway solo reenvía peticiones con un JWT válido de Identity Platform.
 
@@ -573,8 +599,12 @@ gcloud config set api_endpoint_overrides/modelarmor \
 gcloud model-armor templates delete "$MODEL_ARMOR_TEMPLATE_ID" \
   --project="$PROJECT_ID" --location="$REGION" --quiet
 
-# 5. Los bindings IAM a nivel de proyecto (Fase 1.4) — no se borran solos al
-# eliminar la SA, quedarían como entradas huérfanas "deleted:serviceAccount:...".
+# 5. Los bindings IAM a nivel de proyecto (Fases 1.1 y 1.4) — no se borran
+# solos al eliminar la SA, quedarían como entradas huérfanas "deleted:...".
+export PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+gcloud projects remove-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+  --role="roles/artifactregistry.writer" --quiet
 gcloud projects remove-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:${SERVICE_SA}" \
   --role="roles/modelarmor.user" --quiet
