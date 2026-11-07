@@ -1,0 +1,74 @@
+[
+  {
+    "id": "F1",
+    "tipo": "factual",
+    "question": "¿Cuánto dura el programa Data Engineer y en qué modalidades se dicta?",
+    "reference": "El programa Data Engineer dura 6 meses y se dicta en modalidad virtual y presencial. Su nivel es intermedio a avanzado."
+  },
+  {
+    "id": "F2",
+    "tipo": "factual",
+    "question": "¿Cuál es la nota mínima aprobatoria y cuánto pesa el proyecto final en la nota?",
+    "reference": "La nota mínima aprobatoria es 14 en escala de 0 a 20. El proyecto final pesa 30% de la nota, los exámenes parciales 30% y los trabajos prácticos 40%."
+  },
+  {
+    "id": "F3",
+    "tipo": "factual",
+    "question": "¿Qué descuento hay por pago al contado y en cuántas cuotas se puede financiar un programa?",
+    "reference": "El pago al contado tiene 15% de descuento. El financiamiento interno es sin intereses, en hasta 6 cuotas mensuales, con un pago inicial del 30% del programa."
+  },
+  {
+    "id": "F4",
+    "tipo": "factual",
+    "question": "¿Qué sede se especializa en Machine Learning y qué equipos tiene su laboratorio de IA?",
+    "reference": "La sede La Molina se especializa en Machine Learning e Inteligencia Artificial. Tiene un cluster de 200 cores y 2TB de RAM, y su laboratorio de IA tiene estaciones con GPUs A100 y acceso a TPUs de Google Cloud."
+  },
+  {
+    "id": "E1",
+    "tipo": "termino_exacto",
+    "question": "¿Qué docente es experto en TOGAF?",
+    "reference": "Patricia Vargas, Enterprise Data Architect del programa de Data Architecture y Chief Data Officer en Cencosud, es experta en TOGAF, data governance y arquitecturas híbridas cloud-on-premise."
+  },
+  {
+    "id": "E2",
+    "tipo": "termino_exacto",
+    "question": "¿Quién enseña D3.js y qué curso del instituto trata ese tema?",
+    "reference": "Andres Lopez, desarrollador frontend del equipo docente de Data Visualization, es experto en D3.js. El curso que trata ese tema es D3.js y Visualizaciones Web, del programa Data Visualization."
+  },
+  {
+    "id": "M1",
+    "tipo": "multi_hop",
+    "question": "¿Qué docentes y qué egresados del instituto trabajan en Yape?",
+    "reference": "En Yape trabaja la docente Sofia Chen, que lidera el equipo de AI y desarrolló modelos de detección de fraude. También trabaja el egresado Roberto Chen, a quien Yape contrató como ML Engineer para modelos de detección de fraude."
+  },
+  {
+    "id": "M2",
+    "tipo": "multi_hop",
+    "question": "¿En qué empresa trabaja el docente de Data Visualization que lidera Business Intelligence, y qué egresada de ese programa trabaja en la misma empresa?",
+    "reference": "El docente Fernando Castro lidera el equipo de Business Intelligence en Falabella. La egresada de Data Visualization Patricia Moreno también trabaja en Falabella como Lead BI Developer."
+  },
+  {
+    "id": "M3",
+    "tipo": "multi_hop",
+    "question": "¿Qué docente trabaja en la misma aseguradora donde fue promovido un egresado de Data Visualization?",
+    "reference": "Ana Rodriguez, docente de Data Engineering, lidera el equipo de Data Platform en Rimac Seguros. En Rimac Seguros fue promovido el egresado de Data Visualization Fernando Torres a Business Intelligence Manager."
+  },
+  {
+    "id": "A1",
+    "tipo": "ambigua",
+    "question": "¿Quién es Carlos Mendoza?",
+    "reference": "Hay dos personas con ese nombre. El docente Carlos Mendoza es Lead Data Engineer en Rappi Perú, con 8 años de experiencia. El egresado Carlos Mendoza completó Data Engineering, ML Engineering y Data Architecture en 18 meses y hoy es CTO de una startup."
+  },
+  {
+    "id": "G1",
+    "tipo": "global",
+    "question": "¿Qué empresas tienen actualmente a la vez docentes y egresados del instituto?",
+    "reference": "Rappi (docente Carlos Mendoza y egresado Diego Morales), Yape (Sofia Chen y Roberto Chen), Mercado Libre (David Ramirez y Andrea Vásquez), Falabella (Fernando Castro y Patricia Moreno), Rimac Seguros (Ana Rodriguez y Fernando Torres), Cencosud (Patricia Vargas y Ricardo Valdez), Linio (Gabriela Morales y Claudia Mendoza) y Globant (la instructora invitada Lucia Rivera y el egresado Luis Gómez)."
+  },
+  {
+    "id": "N1",
+    "tipo": "sin_respuesta",
+    "question": "¿Cuál es el precio del programa ML Engineer?",
+    "reference": "La base de conocimiento no indica el precio del programa. Solo menciona la reserva de cupo de S/500, el descuento de 15% por pago al contado y el financiamiento en hasta 6 cuotas sin intereses."
+  }
+]
