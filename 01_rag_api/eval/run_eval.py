@@ -17,6 +17,7 @@ fila a eval/results/resumen.csv para comparar configuraciones.
 """
 
 import argparse
+import asyncio
 import json
 import re
 import sys
@@ -26,15 +27,14 @@ from pathlib import Path
 
 import httpx
 import pandas as pd
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from ragas import EvaluationDataset, evaluate
-from ragas.embeddings import LangchainEmbeddingsWrapper
-from ragas.llms import LangchainLLMWrapper
-from ragas.metrics import (
+from openai import AsyncOpenAI
+from ragas.embeddings import OpenAIEmbeddings
+from ragas.llms import llm_factory
+from ragas.metrics.collections import (
+    AnswerRelevancy,
+    ContextPrecisionWithReference,
+    ContextRecall,
     Faithfulness,
-    LLMContextPrecisionWithReference,
-    LLMContextRecall,
-    ResponseRelevancy,
 )
 
 from src.utils.environment import OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL
@@ -42,7 +42,6 @@ from src.utils.environment import OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL
 HERE = Path(__file__).resolve().parent
 RESULTS = HERE / "results"
 CITES = re.compile(r"\s*\[[CG]\d+\]")
-INPUT_COLUMNS = {"user_input", "retrieved_contexts", "response", "reference"}
 
 
 def parse_contexts(raw: str | None) -> list[str]:
@@ -89,22 +88,43 @@ def collect(api: str, dataset: list[dict], transport: httpx.BaseTransport | None
 
 def score(rows: list[dict], eval_model: str, llm=None, embeddings=None) -> pd.DataFrame:
     """Paso 2: un LLM juez puntua cada fila. Temperatura 0 para que sea repetible."""
-    llm = llm or LangchainLLMWrapper(ChatOpenAI(api_key=OPENAI_API_KEY, model=eval_model, temperature=0))
-    embeddings = embeddings or LangchainEmbeddingsWrapper(
-        OpenAIEmbeddings(api_key=OPENAI_API_KEY, model=OPENAI_EMBEDDING_MODEL)
-    )
-    dataset = EvaluationDataset.from_list([{k: r[k] for k in INPUT_COLUMNS} for r in rows])
-    result = evaluate(
-        dataset,
-        metrics=[Faithfulness(), ResponseRelevancy(), LLMContextPrecisionWithReference(), LLMContextRecall()],
-        llm=llm,
-        embeddings=embeddings,
-        show_progress=True,
-    )
-    scores = result.to_pandas().rename(columns={"llm_context_precision_with_reference": "context_precision"})
-    metric_cols = [c for c in scores.columns if c not in INPUT_COLUMNS]
-    extra = pd.DataFrame(rows)[["id", "tipo", "latencia_s", "grounding_ratio", "trace_id"]]
-    return pd.concat([extra, scores[["user_input"] + metric_cols]], axis=1)
+
+    async def run() -> dict[str, list[float]]:
+        client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        judge = llm or llm_factory(eval_model, client=client, temperature=0)
+        emb = embeddings or OpenAIEmbeddings(client=client, model=OPENAI_EMBEDDING_MODEL)
+
+        # Cada metrica recibe solo los campos que usa.
+        metrics = {
+            "faithfulness": (Faithfulness(llm=judge), ("user_input", "response", "retrieved_contexts")),
+            "answer_relevancy": (AnswerRelevancy(llm=judge, embeddings=emb), ("user_input", "response")),
+            "context_precision": (
+                ContextPrecisionWithReference(llm=judge),
+                ("user_input", "reference", "retrieved_contexts"),
+            ),
+            "context_recall": (ContextRecall(llm=judge), ("user_input", "retrieved_contexts", "reference")),
+        }
+
+        async def one(metric, fields, row):
+            try:
+                return float((await metric.ascore(**{f: row[f] for f in fields})).value)
+            except Exception as exc:  # una fila fallida no tumba la corrida
+                print(f"  [warn] {metric.name} fallo en {row['id']}: {exc}")
+                return float("nan")
+
+        try:
+            results = await asyncio.gather(
+                *(asyncio.gather(*(one(m, f, r) for r in rows)) for m, f in metrics.values())
+            )
+        finally:
+            await client.close()
+        return dict(zip(metrics, results))
+
+    scores = asyncio.run(run())
+    df = pd.DataFrame(rows)[["id", "tipo", "latencia_s", "grounding_ratio", "trace_id", "user_input"]]
+    for name, values in scores.items():
+        df[name] = values
+    return df
 
 
 def report(df: pd.DataFrame, label: str) -> dict:
