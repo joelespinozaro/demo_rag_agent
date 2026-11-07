@@ -22,7 +22,7 @@ from deepeval.test_case import LLMTestCase, SingleTurnParams
 
 from eval.run_eval import collect
 
-API = os.getenv("EVAL_API", "http://localhost:8000")
+API = os.getenv("EVAL_API", "http://localhost:8080")
 EVAL_MODEL = os.getenv("EVAL_MODEL", "gpt-4o-mini")
 GOLDEN = json.loads((Path(__file__).parent / "golden_dataset.json").read_text(encoding="utf-8"))
 # Un caso por tipo de pregunta para que la suite corra rapido en CI.

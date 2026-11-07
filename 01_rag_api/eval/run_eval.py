@@ -132,7 +132,7 @@ def report(df: pd.DataFrame, label: str) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--label", required=True, help="nombre de la configuracion evaluada, ej. baseline")
-    parser.add_argument("--api", default="http://localhost:8000")
+    parser.add_argument("--api", default="http://localhost:8080")
     parser.add_argument("--dataset", default=str(HERE / "golden_dataset.json"))
     parser.add_argument("--eval-model", default="gpt-4o-mini")
     parser.add_argument("--min-faithfulness", type=float, default=None, help="compuerta de calidad para CI")
