@@ -6,7 +6,8 @@ from src.services.history_service import HistoryService
 from src.integrations.impl.openai_embedding_integration import OpenAIEmbeddingIntegration
 from src.integrations.impl.qdrant_integration import QdrantIntegration
 from src.integrations.impl.qdrant_hybrid_integration import QdrantHybridIntegration
-from src.utils.environment import SEARCH_MODE
+from src.utils.environment import GRAPH_ENABLED, NEO4J_URI, SEARCH_MODE
+from src.integrations.impl.neo4j_graph_integration import Neo4jGraphIntegration
 from src.integrations.impl.openai_llm_integration import OpenAILlmIntegration
 from src.integrations.impl.openai_query_expansion_integration import OpenAIQueryExpansionIntegration
 from src.integrations.impl.openai_reranker_integration import OpenAIRerankerIntegration
@@ -22,6 +23,7 @@ async def handle_chat(
     llm = OpenAILlmIntegration()
     query_expansion = OpenAIQueryExpansionIntegration()
     reranker = OpenAIRerankerIntegration()
+    graph = Neo4jGraphIntegration() if GRAPH_ENABLED and NEO4J_URI else None
     
     service = AgentService(
         embedding=embedding,
@@ -29,6 +31,7 @@ async def handle_chat(
         llm_integration=llm,
         query_expansion=query_expansion,
         reranker=reranker,
+        graph=graph,
         db=db,
     )
     return await service.chat(question=question, user=user, session_id=session_id)

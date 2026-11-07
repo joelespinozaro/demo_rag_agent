@@ -1,3 +1,4 @@
+import json
 import time
 from typing import List, Optional
 import uuid
@@ -12,7 +13,8 @@ from src.utils.environment import (
     HISTORY_LIMIT,
     RETRIEVAL_LIMIT,
     RETRIEVAL_CANDIDATES,
-    QUERY_EXPANSION_COUNT
+    QUERY_EXPANSION_COUNT,
+    GRAPH_SEED_K,
 )
 from src.utils.logger import get_logger
 from src.integrations.db_vectorial_integration import DbVectorialIntegration
@@ -21,6 +23,8 @@ from src.integrations.llm_integration import LLMIntegration
 from src.dto.busqueda_dto import ElementoBusqueda
 from src.integrations.query_expansion_integration import QueryExpansionIntegration
 from src.integrations.reranker_integration import RerankerIntegration
+from src.integrations.graph_integration import GraphIntegration
+from src.services.grounding import build_context, check_citations
 
 logger = get_logger(__name__)
 
@@ -33,6 +37,7 @@ class AgentService:
         llm_integration: LLMIntegration,
         query_expansion: QueryExpansionIntegration,
         reranker: RerankerIntegration,
+        graph: Optional[GraphIntegration] = None,
     ) -> None:
             
         self._repo = HistoryRepository(db)
@@ -41,14 +46,15 @@ class AgentService:
         self._llm = llm_integration
         self._query_expansion = query_expansion
         self._reranker = reranker
+        self._graph = graph
                 
-    def _retrieve_with_query_expansion(self, question: str) -> tuple[list[ElementoBusqueda], int]:
+    def _retrieve_with_query_expansion(self, question: str, question_vector: list[float]) -> tuple[list[ElementoBusqueda], int]:
         variants = self._query_expansion.expand(question, QUERY_EXPANSION_COUNT)
         queries = [question] + variants
 
         best_by_id: dict[str, ElementoBusqueda] = {}
         for query in queries:
-            vector = self._embedding.generate_embedding(query)
+            vector = question_vector if query == question else self._embedding.generate_embedding(query)
             for ctx in self._dbVectorial.search(vector, limit=RETRIEVAL_CANDIDATES, query_text=query):
                 existing = best_by_id.get(ctx.id)
                 if existing is None or ctx.score > existing.score:
@@ -86,15 +92,27 @@ class AgentService:
         # Implementar RAG
         # Paso 1 y 2: Expandir la pregunta en variantes y buscar documentos similares
         # para cada una, fusionando y deduplicando los resultados (query expansion).
-        candidates, variants_count = self._retrieve_with_query_expansion(question)
-         
+        question_vector = self._embedding.generate_embedding(question)
+        candidates, variants_count = self._retrieve_with_query_expansion(question, question_vector)
+
+        # Paso 2b: GraphRAG (local search). Las fichas de entidad del grafo entran
+        # como candidatos y compiten con los chunks en el reranking.
+        graph_count = 0
+        if self._graph is not None:
+            fichas = self._graph.search(question_vector, k=GRAPH_SEED_K)
+            graph_count = len(fichas)
+            candidates = candidates + fichas
+
         # Paso 3: Reranking de los candidatos con el LLM, quedandonos con el top-k final.
         contexts = self._rerank(question, candidates)
-        formatted_contexts = "\n".join([f"- {ctx.content}" for ctx in contexts])
-        
-        # Paso 3: Inferir respuesta
-        result = self._llm.generate_response(question, formatted_contexts, history_messages)
-        retrieved_contexts = formatted_contexts
+
+        # Paso 4: Grounding. Cada contexto lleva un id citable: [C1] chunk, [G1] grafo.
+        context_text, sources = build_context(contexts)
+
+        # Paso 5: Inferir respuesta y validar que cada oracion cite su fuente.
+        result = self._llm.generate_response(question, context_text, history_messages)
+        grounding = check_citations(result.answer, {s["id"] for s in sources})
+        retrieved_contexts = json.dumps(sources, ensure_ascii=False)
 
         t_agent = time.perf_counter() - t0
 
@@ -124,6 +142,9 @@ class AgentService:
                 "query_variants_count": variants_count,
                 "retrieval_candidates_count": len(candidates),
                 "retrieved_contexts_count": len(contexts),
+                "graph_candidates_count": graph_count,
+                "grounding_ratio": grounding["ratio"],
+                "uncited_sentences": len(grounding["sin_cita"]),
             },
         )
 
@@ -132,6 +153,11 @@ class AgentService:
             "answer": result.answer,
             "session_id": session_id,
             "trace_id": trace_id,
+            "sources": [
+                {"id": s["id"], "tipo": s["tipo"], "source_file": s["source_file"], "extracto": s["content"][:240]}
+                for s in sources
+            ],
+            "grounding": grounding,
         }
 
     

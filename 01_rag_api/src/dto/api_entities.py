@@ -9,11 +9,26 @@ class ChatRequest(BaseModel):
     user: str
     session_id: Optional[str] = None
 
+class Fuente(BaseModel):
+    id: str              # [C1] chunk del vector DB, [G1] ficha del grafo
+    tipo: str            # chunk | grafo
+    source_file: str     # archivo de origen: el final de la cadena de citas
+    extracto: str
+
+class Grounding(BaseModel):
+    oraciones: int
+    citadas: int
+    ratio: float
+    sin_cita: List[str] = []
+    cita_invalida: List[str] = []
+
 class ChatResponse(BaseModel):
     user: str
     answer: str
     session_id: UUID
     trace_id: UUID
+    sources: List[Fuente] = []
+    grounding: Optional[Grounding] = None
 
 class HistoryItem(BaseModel):
     question: str
