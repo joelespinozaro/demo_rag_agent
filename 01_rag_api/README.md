@@ -33,11 +33,14 @@ pip install -r requirements.txt
 cp .env.example .env              # Windows: copy .env.example .env
 ```
 
-Completa `.env`. Si nunca cargaste la colección `data-academy`, abre `setup/qdrant-db.ipynb` desde la carpeta `setup/` (usa su propio `setup/.env`) y córrelo completo y si tu base no tiene la tabla `history`, ejecuta `setup/database.sql`.
+Completa `.env`. Si nunca cargaste la colección `data-academy`, abre `setup/qdrant-db.ipynb` desde la carpeta `setup/` (usa su propio `setup/.env`) y córrelo completo. Si tu base no tiene la tabla `history`, ejecuta `setup/database.sql`.
 
 ## Comandos por laboratorio
 
 ```bash
+# Antes de empezar: revisa .env, Qdrant y PostgreSQL
+python -m scripts.check_setup
+
 # Lab 1 · búsqueda híbrida
 python -m scripts.build_hybrid_index
 python -m scripts.compare_search "¿Qué docente es experto en TOGAF?"
