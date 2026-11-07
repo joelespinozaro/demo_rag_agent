@@ -5,6 +5,8 @@ from src.services.agent_service import AgentService
 from src.services.history_service import HistoryService
 from src.integrations.impl.openai_embedding_integration import OpenAIEmbeddingIntegration
 from src.integrations.impl.qdrant_integration import QdrantIntegration
+from src.integrations.impl.qdrant_hybrid_integration import QdrantHybridIntegration
+from src.utils.environment import SEARCH_MODE
 from src.integrations.impl.openai_llm_integration import OpenAILlmIntegration
 from src.integrations.impl.openai_query_expansion_integration import OpenAIQueryExpansionIntegration
 from src.integrations.impl.openai_reranker_integration import OpenAIRerankerIntegration
@@ -16,7 +18,7 @@ async def handle_chat(
     db: Session,
 ) -> dict:
     embedding = OpenAIEmbeddingIntegration()
-    dbVectorial = QdrantIntegration()
+    dbVectorial = QdrantHybridIntegration() if SEARCH_MODE == "hybrid" else QdrantIntegration()
     llm = OpenAILlmIntegration()
     query_expansion = OpenAIQueryExpansionIntegration()
     reranker = OpenAIRerankerIntegration()

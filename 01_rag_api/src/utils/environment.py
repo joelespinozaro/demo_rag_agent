@@ -15,6 +15,11 @@ RETRIEVAL_CANDIDATES: int = config("RETRIEVAL_CANDIDATES", default=15, cast=int)
 QDRANT_URL: str | None = config("QDRANT_URL", default=None)
 QDRANT_API_KEY: str | None = config("QDRANT_API_KEY", default=None)
 QDRANT_COLLECTION_NAME: str = config("QDRANT_COLLECTION_NAME", default="documents")
+QDRANT_HYBRID_COLLECTION: str = config("QDRANT_HYBRID_COLLECTION", default=f"{QDRANT_COLLECTION_NAME}-hybrid")
+# dense = solo vectores (coleccion original) | hybrid = vectores + BM25 con RRF
+SEARCH_MODE: str = config("SEARCH_MODE", default="hybrid")
+HYBRID_PREFETCH_LIMIT: int = config("HYBRID_PREFETCH_LIMIT", default=30, cast=int)
+HYBRID_RRF_K: int = config("HYBRID_RRF_K", default=60, cast=int)
 
 NEON_API_KEY: str | None = config("NEON_API_KEY", default=None)
 

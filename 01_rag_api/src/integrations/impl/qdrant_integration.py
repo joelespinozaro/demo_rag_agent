@@ -23,7 +23,8 @@ class QdrantIntegration(DbVectorialIntegration):
             embedding=embeddings,
         )
 
-    def search(self, vector: list[float], limit: int = 5) -> list[ElementoBusqueda]:
+    def search(self, vector: list[float], limit: int = 5, query_text: str | None = None) -> list[ElementoBusqueda]:
+        # Busqueda solo densa: query_text se ignora.
         docs_with_scores = self._vector_store.similarity_search_with_score_by_vector(vector, k=limit)
         return [
             ElementoBusqueda(

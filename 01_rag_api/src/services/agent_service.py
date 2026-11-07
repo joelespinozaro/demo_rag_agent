@@ -49,7 +49,7 @@ class AgentService:
         best_by_id: dict[str, ElementoBusqueda] = {}
         for query in queries:
             vector = self._embedding.generate_embedding(query)
-            for ctx in self._dbVectorial.search(vector, limit=RETRIEVAL_CANDIDATES):
+            for ctx in self._dbVectorial.search(vector, limit=RETRIEVAL_CANDIDATES, query_text=query):
                 existing = best_by_id.get(ctx.id)
                 if existing is None or ctx.score > existing.score:
                     best_by_id[ctx.id] = ctx
