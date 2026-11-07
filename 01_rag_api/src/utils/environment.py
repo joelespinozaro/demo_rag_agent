@@ -28,7 +28,8 @@ GRAPH_ENABLED: bool = config("GRAPH_ENABLED", default=True, cast=bool)
 NEO4J_URI: str | None = config("NEO4J_URI", default=None)
 NEO4J_USERNAME: str = config("NEO4J_USERNAME", default="neo4j")
 NEO4J_PASSWORD: str | None = config("NEO4J_PASSWORD", default=None)
-NEO4J_DATABASE: str = config("NEO4J_DATABASE", default="neo4j")
+# Vacio = base por defecto de la instancia (recomendado en Aura). Solo llenalo si tu archivo de credenciales lo trae.
+NEO4J_DATABASE: str | None = config("NEO4J_DATABASE", default="") or None
 GRAPH_SEED_K: int = config("GRAPH_SEED_K", default=4, cast=int)
 GRAPH_MAX_RELATIONS: int = config("GRAPH_MAX_RELATIONS", default=15, cast=int)
 
